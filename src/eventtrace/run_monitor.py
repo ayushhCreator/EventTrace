@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -28,15 +29,20 @@ def main() -> None:
     settings = Settings()
     db = DB(settings.db_path)
     db.ensure_schema()
+    run_once = os.getenv("CHD_ONCE", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    max_iterations_raw = os.getenv("CHD_MAX_ITERATIONS", "").strip()
+    max_iterations = int(max_iterations_raw) if max_iterations_raw else 0
 
     print(f"Monitoring {settings.url}")
     print(f"DB: {settings.db_path}")
     print(f"Poll seconds: {settings.poll_seconds}")
 
+    iterations_done = 0
     while True:
         observed = utc_now()
         try:
             rows = scrape_table_once_sync(settings)
+            print(f"[{observed.isoformat()}] scraped_rows={len(rows)}")
             snapshot: dict[str, dict[str, Any]] = {}
             for row in rows:
                 court_id = _build_court_id(row, settings.key_fields)
@@ -48,15 +54,21 @@ def main() -> None:
                 observed_time=observed,
                 ignore_fields=settings.key_fields,
             )
+            print(f"[{observed.isoformat()}] event_traces={len(changes)}")
             for c in changes:
                 print(
                     f"[{observed.isoformat()}] {c.court_id} {c.field_name}: "
                     f"{c.old_value!r} -> {c.new_value!r} ({c.duration_seconds}s)"
                 )
         except KeyboardInterrupt:
-            raise
+            print("Stopped.")
+            return
         except Exception as e:
             print(f"[{observed.isoformat()}] scrape/apply failed: {e!r}")
 
+        if run_once:
+            return
+        iterations_done += 1
+        if max_iterations and iterations_done >= max_iterations:
+            return
         time.sleep(settings.poll_seconds)
-

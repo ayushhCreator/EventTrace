@@ -9,12 +9,12 @@ from .config import Settings
 
 
 def main() -> None:
-    settings = Settings(headless=False)  # force non-headless for manual captcha
+    settings = Settings(headless=False, chromium_sandbox=False)  # force UI for manual captcha
     state_path = Path(settings.storage_state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=False, chromium_sandbox=settings.chromium_sandbox)
         context = browser.new_context()
         page = context.new_page()
         page.goto(settings.url, wait_until="domcontentloaded")
@@ -27,4 +27,3 @@ def main() -> None:
         browser.close()
 
     print(f"Saved storage state to {state_path}")
-

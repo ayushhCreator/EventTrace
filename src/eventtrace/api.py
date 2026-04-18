@@ -50,5 +50,5 @@ def main() -> None:
 
     settings = Settings()
     host = os.getenv("CHD_API_HOST", "127.0.0.1")
-    port = int(os.getenv("CHD_API_PORT", "8000"))
+    port = int(os.getenv("CHD_API_PORT", "8009"))
     uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=False)

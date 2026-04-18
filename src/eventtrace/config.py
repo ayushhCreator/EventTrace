@@ -31,6 +31,7 @@ class Settings:
         db_path: str | None = None,
         storage_state_path: str | None = None,
         headless: bool | None = None,
+        chromium_sandbox: bool | None = None,
     ) -> None:
         self.url = url or _get_env("CHD_URL", "https://display.calcuttahighcourt.gov.in/principal.php")
         self.table_selector = table_selector or _get_env("CHD_TABLE_SELECTOR", "table")
@@ -47,3 +48,8 @@ class Settings:
             "CHD_STORAGE_STATE_PATH", "./.state/storage_state.json"
         )
         self.headless = headless if headless is not None else _get_env_bool("CHD_HEADLESS", True)
+        self.chromium_sandbox = (
+            chromium_sandbox
+            if chromium_sandbox is not None
+            else _get_env_bool("CHD_CHROMIUM_SANDBOX", False)
+        )

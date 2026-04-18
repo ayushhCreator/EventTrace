@@ -42,6 +42,7 @@ All config is via environment variables (optional):
 - `CHD_DB_PATH` (default: `./eventtrace.sqlite3`)
 - `CHD_STORAGE_STATE_PATH` (default: `./.state/storage_state.json`)
 - `CHD_HEADLESS` (default: `0` for init-session, `1` for monitor unless unset)
+- `CHD_CHROMIUM_SANDBOX` (default: `0`)
 
 ## Notes
 

@@ -17,3 +17,6 @@ build/
 
 playwright-report/
 test-results/
+
+# Local debug artifacts
+cmc_debug.png
