@@ -1,0 +1,34 @@
+[project]
+name = "EventTrace"
+version = "0.1.0"
+description = "Real-time Calcutta High Court display board monitor with change tracking."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.44.0",
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+]
+
+[project.scripts]
+chd-init-session = "eventtrace.init_session:main"
+chd-run-monitor = "eventtrace.run_monitor:main"
+chd-api = "eventtrace.api:main"
+
+court-display-init-session = "eventtrace.init_session:main"
+court-display-run-monitor = "eventtrace.run_monitor:main"
+court-display-api = "eventtrace.api:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
