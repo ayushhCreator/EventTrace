@@ -118,3 +118,6 @@ def main() -> None:
         sample = list(prev.items())[:10]
         print("sample:", {k: v for k, v in sample})
 
+
+if __name__ == "__main__":
+    main()
