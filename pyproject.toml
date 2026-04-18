@@ -19,6 +19,8 @@ court-display-init-session = "eventtrace.init_session:main"
 court-display-run-monitor = "eventtrace.run_monitor:main"
 court-display-api = "eventtrace.api:main"
 
+eventtrace-cmc-simple = "eventtrace.cmc_simple:main"
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
