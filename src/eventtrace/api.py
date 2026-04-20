@@ -47,6 +47,14 @@ def create_app() -> FastAPI:
     def field_state(court_id: str) -> list[dict]:
         return db.list_field_state(court_id)
 
+    @app.get("/history/dates")
+    def history_dates() -> list[str]:
+        return db.list_active_dates()
+
+    @app.get("/history/day")
+    def history_day(date: str = Query(..., description="YYYY-MM-DD in IST")) -> list[dict]:
+        return db.list_day_activity(date)
+
     @app.get("/export/current-state.csv")
     def export_current_state_csv():
         rows = db.list_current_state()

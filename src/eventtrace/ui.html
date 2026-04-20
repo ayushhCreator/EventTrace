@@ -352,6 +352,81 @@
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
+
+  /* ── Room info icon + popup ─────────────────────────────────────────────── */
+  .court-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ink-300);
+    color: var(--ink-500);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    background: #fff;
+    flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    user-select: none;
+  }
+  .info-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: #f0fafa;
+  }
+
+  #room-popup {
+    position: fixed;
+    z-index: 999;
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(13,27,42,0.14);
+    padding: 14px 16px;
+    min-width: 200px;
+    max-width: 280px;
+    display: none;
+    pointer-events: auto;
+  }
+  #room-popup.visible { display: block; }
+  #room-popup .popup-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-500);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  #room-popup .popup-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 5px;
+    font-size: 0.85rem;
+  }
+  #room-popup .popup-row:last-child { margin-bottom: 0; }
+  #room-popup .popup-label { color: var(--ink-500); flex-shrink: 0; }
+  #room-popup .popup-val   { font-weight: 600; color: var(--ink-900); text-align: right; }
+  #room-popup .popup-close {
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 16px;
+    color: var(--ink-300);
+    cursor: pointer;
+    line-height: 1;
+  }
+  #room-popup .popup-close:hover { color: var(--ink-700); }
 </style>
 </head>
 <body>
@@ -461,13 +536,89 @@
     </section>
 
   </div>
+
+  <!-- History -->
+  <section class="panel" aria-labelledby="hist-title">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2 id="hist-title">History</h2>
+        <p>Court activity by date — what appeared, disappeared, or changed</p>
+      </div>
+      <div class="controls">
+        <select id="hist-date" aria-label="Select date">
+          <option value="">Select date…</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="hist-table">
+        <thead>
+          <tr>
+            <th>Court</th>
+            <th>Changes</th>
+            <th>Fields Affected</th>
+            <th>First Event (IST)</th>
+            <th>Last Event (IST)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="hist-body">
+          <tr><td class="empty" colspan="6">Pick a date above.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
+<div id="room-popup" role="tooltip" aria-label="Room details">
+  <span class="popup-close" id="popup-close" title="Close">×</span>
+  <div class="popup-title">Court Info</div>
+  <div class="popup-row"><span class="popup-label">Room</span><span class="popup-val" id="popup-room">—</span></div>
+  <div class="popup-row"><span class="popup-label">Location</span><span class="popup-val" id="popup-location">—</span></div>
+  <div class="popup-row"><span class="popup-label">Side</span><span class="popup-val" id="popup-side">—</span></div>
+</div>
+
 <script>
 const BASE = window.location.origin;
 document.getElementById("api-base").textContent = BASE;
+
+// ── Room popup ────────────────────────────────────────────────────────────────
+(function() {
+  const popup = document.getElementById("room-popup");
+  document.getElementById("popup-close").addEventListener("click", () => popup.classList.remove("visible"));
+  document.addEventListener("click", e => {
+    if (!popup.contains(e.target) && !e.target.classList.contains("info-btn"))
+      popup.classList.remove("visible");
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") popup.classList.remove("visible"); });
+})();
+
+function showRoomPopup(btn, roomNo, location, side) {
+  const popup = document.getElementById("room-popup");
+  document.getElementById("popup-room").textContent     = roomNo   || "—";
+  document.getElementById("popup-location").textContent = location || "—";
+  document.getElementById("popup-side").textContent     = side     || "—";
+  const r = btn.getBoundingClientRect();
+  popup.style.top  = (r.bottom + window.scrollY + 6) + "px";
+  popup.style.left = Math.min(r.left + window.scrollX, window.innerWidth - 296) + "px";
+  popup.classList.add("visible");
+}
+
+// ── Serial number formatter ───────────────────────────────────────────────────
+// Combines side_short_form + list type abbreviation + aggregated serial range
+// e.g. side="A", type=1001 (Daily), sr="15-16,29,31,33" → "AD 15-16,29,31,33"
+function fmtSerialNo(d) {
+  const sr = d.cause_list_sr_no;
+  if (sr == null || sr === "") return "—";
+  const side = d.side_short_form || "";
+  const typeCode = d.cause_list_type;
+  const typeLetter = typeCode === 1001 ? "D" : typeCode === 1002 ? "M" : "";
+  const prefix = side + typeLetter;
+  return prefix ? prefix + " " + sr : String(sr);
+}
 
 // ── Fields ────────────────────────────────────────────────────────────────────
 // User-facing names for known fields
@@ -515,8 +666,24 @@ const DEV_ONLY_FIELDS = [
   "vc_link",
 ];
 
-// Dev-only event trace field names
-const DEV_FIELD_NAMES = new Set(["__present__", ...DEV_ONLY_FIELDS.map(f => f)]);
+// Dev-only event trace field names (__present__ shown in user mode as Appeared/Disappeared)
+const DEV_FIELD_NAMES = new Set([...DEV_ONLY_FIELDS]);
+
+// ── Court lookup: court_no → room_no ─────────────────────────────────────────
+// Built from current state on each load; used in event traces display
+const courtMap = {}; // court_id (court_no str) → room_no str
+
+function buildCourtMap(currentRows) {
+  currentRows.forEach(row => {
+    const roomNo = (row.data || {}).room_no;
+    if (roomNo != null) courtMap[String(row.court_id)] = String(roomNo);
+  });
+}
+
+function courtLabel(courtId) {
+  const room = courtMap[String(courtId)];
+  return room != null ? "Court " + room : String(courtId);
+}
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
 let devMode = false;
@@ -584,6 +751,7 @@ async function loadCurrentState() {
   try {
     const r = await fetch(BASE + "/current-state");
     appState.current = await r.json();
+    buildCourtMap(appState.current);
     renderCurrentState();
   } catch {
     document.getElementById("cs-head").innerHTML = "";
@@ -594,7 +762,19 @@ async function loadCurrentState() {
 
 function renderCurrentState() {
   const query = document.getElementById("cs-filter").value.trim().toLowerCase();
-  const rows  = appState.current.filter(r => !query || String(r.court_id || "").toLowerCase().includes(query));
+
+  // Sort by room_no ascending (numeric)
+  const sorted = [...appState.current].sort((a, b) => {
+    const ra = Number((a.data || {}).room_no ?? 9999);
+    const rb = Number((b.data || {}).room_no ?? 9999);
+    return ra - rb;
+  });
+
+  const rows = sorted.filter(r => {
+    if (!query) return true;
+    const room = String((r.data || {}).room_no ?? "");
+    return room.includes(query) || String(r.court_id || "").toLowerCase().includes(query);
+  });
 
   if (!rows.length) {
     document.getElementById("cs-head").innerHTML = "";
@@ -603,28 +783,30 @@ function renderCurrentState() {
     return;
   }
 
-  // Columns: always show court_id + user fields; dev mode adds dev-only fields
-  const visibleFields = [...USER_FIELDS];
-  const devFields     = DEV_ONLY_FIELDS;
+  // user fields minus room_no (shown as "Court" column); dev adds dev-only
+  const userDataFields = USER_FIELDS.filter(f => f !== "room_no");
+  const devFields      = DEV_ONLY_FIELDS;
 
-  // Build header
-  let headHTML = "<th>Court ID</th>";
-  visibleFields.forEach(f => {
-    headHTML += "<th>" + safe(fieldLabel(f)) + "</th>";
-  });
-  devFields.forEach(f => {
-    headHTML += "<th class='dev-col'>" + safe(fieldLabel(f)) + "</th>";
-  });
+  // Header
+  let headHTML = "<th>Court</th>";
+  userDataFields.forEach(f => { headHTML += "<th>" + safe(fieldLabel(f)) + "</th>"; });
+  devFields.forEach(f => { headHTML += "<th class='dev-col'>" + safe(fieldLabel(f)) + "</th>"; });
   headHTML += "<th>Last Seen</th>";
   document.getElementById("cs-head").innerHTML = headHTML;
 
-  // Build body
+  // Body
   const bodyHTML = rows.map(row => {
     const d = row.data || {};
-    let cells = "<td><span class='mono'>" + safe(row.court_id ?? "—") + "</span></td>";
-    visibleFields.forEach(f => {
-      const v = d[f];
-      cells += "<td>" + safe(v ?? (v === null ? "—" : "—")) + "</td>";
+    const roomLabel = d.room_no != null ? "Court " + d.room_no : safe(row.court_id ?? "—");
+    const infoBtn = "<span class='info-btn' tabindex='0' title='Room info' "
+      + "data-room='" + safe(d.room_no ?? "") + "' "
+      + "data-loc='"  + safe(d.vc_link ?? "") + "' "
+      + "data-side='" + safe(d.side ?? "") + "' "
+      + ">i</span>";
+    let cells = "<td><span class='court-cell'><span class='mono'>" + safe(roomLabel) + "</span>" + infoBtn + "</span></td>";
+    userDataFields.forEach(f => {
+      const val = f === "cause_list_sr_no" ? safe(fmtSerialNo(d)) : safe(d[f] ?? "—");
+      cells += "<td>" + val + "</td>";
     });
     devFields.forEach(f => {
       cells += "<td class='dev-col dim'>" + safe(d[f] ?? "—") + "</td>";
@@ -635,7 +817,7 @@ function renderCurrentState() {
 
   document.getElementById("cs-body").innerHTML = bodyHTML;
 
-  const shownFieldCount = visibleFields.length + (devMode ? devFields.length : 0);
+  const shownFieldCount = userDataFields.length + (devMode ? devFields.length : 0);
   updateMetrics(rows, shownFieldCount);
 }
 
@@ -666,11 +848,18 @@ function renderEventTraces() {
     return;
   }
 
-  const bodyHTML = appState.traces.map(row => {
+  // Sort by room_no ascending, then by observed_time descending within same court
+  const sorted = [...appState.traces].sort((a, b) => {
+    const ra = Number(courtMap[String(a.court_id)] ?? 9999);
+    const rb = Number(courtMap[String(b.court_id)] ?? 9999);
+    if (ra !== rb) return ra - rb;
+    return new Date(b.observed_time) - new Date(a.observed_time);
+  });
+
+  const bodyHTML = sorted.map(row => {
     const isPresence = row.field_name === "__present__";
     const isDev      = DEV_FIELD_NAMES.has(row.field_name);
 
-    // In user mode, skip dev-only fields (presence + technical)
     if (!devMode && isDev) return "";
 
     let badge;
@@ -688,9 +877,11 @@ function renderEventTraces() {
       ? "<span class='muted-change'>Presence changed</span>"
       : "<span class='muted-change'>" + safe(row.old_value ?? "∅") + "</span> → <strong>" + safe(row.new_value ?? "∅") + "</strong>";
 
+    const label = courtLabel(row.court_id);
+
     return "<tr>"
       + "<td class='dev-col dim'>" + safe(row.id ?? "—") + "</td>"
-      + "<td><span class='mono'>" + safe(row.court_id ?? "—") + "</span></td>"
+      + "<td><span class='mono'>" + safe(label) + "</span></td>"
       + "<td>" + badge + "</td>"
       + "<td>" + change + "</td>"
       + "<td class='dim'>" + safe(fmtDuration(row.duration_seconds)) + "</td>"
@@ -725,15 +916,122 @@ async function refreshAll() {
   document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
 }
 
+// ── History ───────────────────────────────────────────────────────────────────
+async function loadHistoryDates() {
+  try {
+    const r = await fetch(BASE + "/history/dates");
+    const dates = await r.json();
+    const sel = document.getElementById("hist-date");
+    // keep first placeholder option
+    sel.innerHTML = '<option value="">Select date…</option>';
+    dates.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d;
+      // format: "Sun, 20 Apr 2026"
+      opt.textContent = new Date(d + "T00:00:00").toLocaleDateString("en-IN", {
+        weekday: "short", day: "numeric", month: "short", year: "numeric"
+      });
+      sel.appendChild(opt);
+    });
+    // auto-select today if present
+    const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD
+    if (dates.includes(today)) sel.value = today;
+    if (sel.value) loadHistoryDay(sel.value);
+  } catch {
+    // silently fail — history is optional
+  }
+}
+
+async function loadHistoryDay(date) {
+  document.getElementById("hist-body").innerHTML =
+    "<tr><td class='empty' colspan='6'>Loading…</td></tr>";
+  try {
+    const r = await fetch(BASE + "/history/day?date=" + encodeURIComponent(date));
+    const rows = await r.json();
+    renderHistoryDay(rows, date);
+  } catch {
+    document.getElementById("hist-body").innerHTML =
+      "<tr><td class='empty' colspan='6'>Could not load history.</td></tr>";
+  }
+}
+
+function fmtIST(isoStr) {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleTimeString("en-IN", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: "Asia/Kolkata"
+  });
+}
+
+function renderHistoryDay(rows, date) {
+  if (!rows.length) {
+    document.getElementById("hist-body").innerHTML =
+      "<tr><td class='empty' colspan='6'>No activity recorded for " + safe(date) + ".</td></tr>";
+    return;
+  }
+
+  const html = rows.map(row => {
+    const label = courtLabel(String(row.court_id));
+    const changes = row.change_count || 0;
+    const fields = (row.fields_changed || "")
+      .split(",").filter(Boolean)
+      .map(f => "<span class='badge badge-field'>" + safe(fieldLabel(f)) + "</span>")
+      .join(" ");
+    const firstEvt = fmtIST(row.first_event);
+    const lastEvt  = fmtIST(row.last_event);
+
+    let status = "";
+    if (row.appeared && row.disappeared)
+      status = "<span class='badge badge-field'>Appeared &amp; Left</span>";
+    else if (row.appeared)
+      status = "<span class='badge badge-appear'>Appeared</span>";
+    else if (row.disappeared)
+      status = "<span class='badge badge-disappear'>Disappeared</span>";
+    else if (changes > 0)
+      status = "<span class='badge badge-field'>Active</span>";
+
+    return "<tr>"
+      + "<td><span class='mono'>" + safe(label) + "</span></td>"
+      + "<td>" + (changes > 0 ? "<strong>" + changes + "</strong>" : "—") + "</td>"
+      + "<td>" + (fields || "—") + "</td>"
+      + "<td class='dim'>" + firstEvt + "</td>"
+      + "<td class='dim'>" + lastEvt  + "</td>"
+      + "<td>" + (status || "—") + "</td>"
+      + "</tr>";
+  }).join("");
+
+  document.getElementById("hist-body").innerHTML = html;
+}
+
 // ── Wire up ───────────────────────────────────────────────────────────────────
 document.getElementById("refresh-now").addEventListener("click", refreshAll);
 document.getElementById("refresh-interval").addEventListener("change", e => startAutoRefresh(Number(e.target.value)));
 document.getElementById("cs-filter").addEventListener("input", renderCurrentState);
+
+// Delegate info-btn clicks on the current-state table
+document.getElementById("cs-body").addEventListener("click", e => {
+  const btn = e.target.closest(".info-btn");
+  if (!btn) return;
+  e.stopPropagation();
+  showRoomPopup(btn, btn.dataset.room, btn.dataset.loc, btn.dataset.side);
+});
+document.getElementById("cs-body").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") {
+    const btn = e.target.closest(".info-btn");
+    if (!btn) return;
+    e.preventDefault();
+    showRoomPopup(btn, btn.dataset.room, btn.dataset.loc, btn.dataset.side);
+  }
+});
 document.getElementById("et-court-filter").addEventListener("input", loadEventTraces);
 document.getElementById("et-limit").addEventListener("change", loadEventTraces);
 document.getElementById("et-export").addEventListener("click", exportEventTraces);
+document.getElementById("hist-date").addEventListener("change", e => {
+  if (e.target.value) loadHistoryDay(e.target.value);
+});
 
 refreshAll();
+loadHistoryDates();
 startAutoRefresh(15);
 </script>
 </body>

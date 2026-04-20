@@ -24,6 +24,49 @@ def _build_court_id(row: dict[str, Any], key_fields: tuple[str, ...]) -> str:
     return json.dumps(row, ensure_ascii=False, sort_keys=True)
 
 
+def _compress_ranges(nums: list[int]) -> str:
+    """[15,16,29,31,33] → '15-16,29,31,33'"""
+    if not nums:
+        return ""
+    nums = sorted(set(nums))
+    parts: list[str] = []
+    start = end = nums[0]
+    for n in nums[1:]:
+        if n == end + 1:
+            end = n
+        else:
+            parts.append(str(start) if start == end else f"{start}-{end}")
+            start = end = n
+    parts.append(str(start) if start == end else f"{start}-{end}")
+    return ",".join(parts)
+
+
+def _aggregate_rows(
+    rows: list[dict[str, Any]], key_fields: tuple[str, ...]
+) -> dict[str, dict[str, Any]]:
+    """Group raw API rows by court_id; aggregate cause_list_sr_no as range string."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        court_id = _build_court_id(row, key_fields)
+        groups.setdefault(court_id, []).append(row)
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for court_id, court_rows in groups.items():
+        # Use last row as the representative (most recent in the list)
+        base = dict(court_rows[-1])
+        # Collect all serial numbers, compress into range string
+        serials: list[int] = []
+        for r in court_rows:
+            try:
+                serials.append(int(r["cause_list_sr_no"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        if serials:
+            base["cause_list_sr_no"] = _compress_ranges(serials)
+        snapshot[court_id] = base
+    return snapshot
+
+
 def main() -> None:
     settings = Settings()
     db = DB(settings.db_path)
@@ -37,10 +80,7 @@ def main() -> None:
         observed = utc_now()
         try:
             rows = scrape_table_once_sync(settings)
-            snapshot: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                court_id = _build_court_id(row, settings.key_fields)
-                snapshot[court_id] = row
+            snapshot = _aggregate_rows(rows, settings.key_fields)
 
             changes = apply_snapshot(
                 db,

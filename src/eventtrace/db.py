@@ -238,3 +238,39 @@ class DB:
         with self.connect() as con:
             rows = con.execute("SELECT court_id FROM current_state").fetchall()
         return {r["court_id"] for r in rows}
+
+    def list_active_dates(self) -> list[str]:
+        """Distinct dates (YYYY-MM-DD, IST offset +05:30) that have event_trace rows."""
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT DISTINCT DATE(observed_time, '+5 hours', '30 minutes') AS d
+                FROM event_trace
+                ORDER BY d DESC
+                """
+            ).fetchall()
+        return [r["d"] for r in rows]
+
+    def list_day_activity(self, date_str: str) -> list[dict[str, Any]]:
+        """Per-court summary of activity on a given date (YYYY-MM-DD local IST)."""
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT
+                  court_id,
+                  SUM(CASE WHEN field_name != '__present__' THEN 1 ELSE 0 END) AS change_count,
+                  GROUP_CONCAT(
+                    DISTINCT CASE WHEN field_name != '__present__' THEN field_name END
+                  ) AS fields_changed,
+                  MIN(observed_time) AS first_event,
+                  MAX(observed_time) AS last_event,
+                  MAX(CASE WHEN field_name='__present__' AND new_value='1' THEN 1 ELSE 0 END) AS appeared,
+                  MAX(CASE WHEN field_name='__present__' AND new_value='0' THEN 1 ELSE 0 END) AS disappeared
+                FROM event_trace
+                WHERE DATE(observed_time, '+5 hours', '30 minutes') = ?
+                GROUP BY court_id
+                ORDER BY court_id
+                """,
+                (date_str,),
+            ).fetchall()
+        return [dict(r) for r in rows]
