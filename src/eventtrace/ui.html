@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EventTrace Dashboard</title>
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+  :root {
+    --ink-900: #0d1b2a;
+    --ink-700: #1f3552;
+    --ink-500: #4f6a86;
+    --ink-300: #8aa0b8;
+    --paper: #f7fafc;
+    --card: #ffffff;
+    --line: #d7e2ec;
+    --soft: #edf3f8;
+    --accent: #0f766e;
+    --accent-strong: #0b5b55;
+    --warning: #c97f00;
+    --danger: #c23b3b;
+    --success: #2e985d;
+    --dev-accent: #6d28d9;
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --shadow: 0 14px 38px rgba(13, 27, 42, 0.08);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "IBM Plex Sans", "Noto Sans", sans-serif;
+    color: var(--ink-900);
+    background:
+      radial-gradient(circle at 10% 10%, rgba(15, 118, 110, 0.12), transparent 35%),
+      radial-gradient(circle at 92% 6%, rgba(17, 110, 187, 0.12), transparent 30%),
+      linear-gradient(180deg, #f8fcff 0%, #f3f8fd 35%, #f7fafc 100%);
+    min-height: 100vh;
+  }
+
+  body.dev-mode {
+    background:
+      radial-gradient(circle at 10% 10%, rgba(109, 40, 217, 0.1), transparent 35%),
+      radial-gradient(circle at 92% 6%, rgba(109, 40, 217, 0.08), transparent 30%),
+      linear-gradient(180deg, #faf8ff 0%, #f5f3fd 35%, #f7f5fc 100%);
+  }
+
+  .shell {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 24px;
+    display: grid;
+    gap: 18px;
+  }
+
+  .topbar {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .brand { display: grid; gap: 4px; }
+  .brand h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: clamp(1.1rem, 2.2vw, 1.55rem);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .brand p { color: var(--ink-500); font-size: 0.9rem; }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .api-chip {
+    font-size: 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 10px;
+    color: var(--ink-700);
+    background: var(--soft);
+  }
+
+  /* Mode toggle */
+  .mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+  .mode-toggle span {
+    padding: 6px 14px;
+    transition: background 0.15s, color 0.15s;
+    color: var(--ink-500);
+    background: #fff;
+  }
+  .mode-toggle span.active-user {
+    background: var(--accent);
+    color: #fff;
+  }
+  .mode-toggle span.active-dev {
+    background: var(--dev-accent);
+    color: #fff;
+  }
+
+  .dev-banner {
+    display: none;
+    background: linear-gradient(135deg, #4c1d95, #6d28d9);
+    color: #ede9fe;
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    font-size: 0.84rem;
+    align-items: center;
+    gap: 10px;
+  }
+  .dev-banner strong { color: #fff; }
+  body.dev-mode .dev-banner { display: flex; }
+
+  .status-row {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .health {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    color: var(--ink-700);
+  }
+
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 3px rgba(46, 152, 93, 0.2);
+  }
+  .dot.stale { background: var(--warning); box-shadow: 0 0 0 3px rgba(201, 127, 0, 0.22); }
+  .dot.dead  { background: var(--danger);  box-shadow: 0 0 0 3px rgba(194, 59, 59, 0.2); }
+
+  .label  { font-size: 0.82rem; color: var(--ink-500); }
+  .value  { color: var(--ink-700); font-weight: 600; font-size: 0.86rem; }
+
+  .status-controls {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+
+  .panel {
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .panel-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(237, 243, 248, 0.62), rgba(255, 255, 255, 0.9));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .panel-title h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: 1.05rem;
+    line-height: 1.1;
+  }
+  .panel-title p { font-size: 0.82rem; color: var(--ink-500); margin-top: 3px; }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  input, select, button, .btn {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 0.84rem;
+    height: 35px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink-700);
+    padding: 0 10px;
+  }
+
+  input, select { min-width: 140px; }
+
+  input:focus, select:focus, button:focus-visible, .btn:focus-visible {
+    outline: 2px solid rgba(15, 118, 110, 0.23);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+
+  button, .btn {
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  }
+  button:hover, .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(13, 27, 42, 0.12);
+  }
+
+  .btn-primary {
+    border-color: transparent;
+    background: linear-gradient(135deg, var(--accent), #148a80);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .table-wrap { overflow: auto; max-height: 70vh; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+
+  th, td {
+    border-bottom: 1px solid #e8eef4;
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    background: #f7fbff;
+    color: #3f5976;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    z-index: 1;
+    white-space: nowrap;
+  }
+
+  /* dev-only columns hidden by default */
+  .dev-col { display: none; }
+  body.dev-mode .dev-col { display: table-cell; }
+
+  /* dim dev columns slightly in dev mode */
+  body.dev-mode th.dev-col,
+  body.dev-mode td.dev-col {
+    color: #7c5cbf;
+    background: #faf8ff;
+    font-style: italic;
+  }
+  body.dev-mode th.dev-col {
+    background: #ede9fe;
+  }
+
+  tbody tr:nth-child(2n) td { background: #fbfdff; }
+  tbody tr:hover td { background: #f2f8ff; }
+
+  .mono { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; letter-spacing: 0.01em; }
+  .dim  { color: var(--ink-500); font-size: 0.78rem; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    border: 1px solid;
+  }
+  .badge-appear    { color: #157042; background: #e9f8ef; border-color: #b9e7cc; }
+  .badge-disappear { color: #9d2d2d; background: #fdeeee; border-color: #f7c9c9; }
+  .badge-field     { color: #714600; background: #fff5df; border-color: #f1deb0; }
+  .badge-dev-field { color: #5b21b6; background: #f3f0ff; border-color: #c4b5fd; font-style: italic; }
+
+  .muted-change { color: var(--ink-500); }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+    gap: 8px;
+    padding: 12px 16px 14px;
+    border-top: 1px solid var(--line);
+    background: #fbfdff;
+  }
+  .metric { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .metric span  { display: block; font-size: 0.76rem; color: var(--ink-500); }
+  .metric strong{ display: block; font-size: 1rem; margin-top: 2px; color: var(--ink-700); }
+
+  .empty { text-align: center; color: var(--ink-500); padding: 28px 14px; }
+
+  #toast {
+    position: fixed;
+    right: 18px; bottom: 18px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(13, 27, 42, 0.9);
+    color: #fff;
+    font-size: 0.82rem;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  @media (max-width: 1080px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .shell { padding: 14px; }
+    .status-controls { width: 100%; margin-left: 0; }
+    .status-controls select, .status-controls button { flex: 1; }
+    .controls { width: 100%; }
+    .controls input, .controls select, .controls button, .controls .btn { flex: 1 1 140px; }
+    .summary { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <div class="brand">
+      <h1>EventTrace Dashboard</h1>
+      <p>Live view — Calcutta High Court display board changes</p>
+    </div>
+    <div class="topbar-right">
+      <div class="api-chip">API: <span id="api-base">—</span></div>
+      <div class="mode-toggle" id="mode-toggle" title="Switch view mode">
+        <span id="toggle-user" class="active-user">User</span>
+        <span id="toggle-dev">Dev</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="dev-banner">
+    <strong>Developer Mode</strong>
+    — all fields shown including technical columns (court_no, cause_list_type, side codes, etc.)
+  </div>
+
+  <section class="status-row" aria-label="Live status">
+    <div class="health"><span class="dot" id="health-dot"></span><span id="health-text">Checking…</span></div>
+    <div><span class="label">Last refresh: </span><span class="value" id="last-refresh">—</span></div>
+    <div><span class="label">Auto-refresh: </span><span class="value" id="interval-display">15s</span></div>
+    <div class="status-controls">
+      <select id="refresh-interval" aria-label="Auto refresh interval">
+        <option value="10">10s</option>
+        <option value="15" selected>15s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+        <option value="0">Off</option>
+      </select>
+      <button id="refresh-now" class="btn-primary" type="button">↺ Refresh</button>
+    </div>
+  </section>
+
+  <div class="grid">
+
+    <!-- Current State -->
+    <section class="panel" aria-labelledby="cs-title">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="cs-title">Current State</h2>
+          <p>Latest snapshot of each court bench</p>
+        </div>
+        <div class="controls">
+          <input id="cs-filter" type="text" placeholder="Filter courts…" aria-label="Filter courts">
+          <a class="btn" href="/export/current-state.csv" download>⬇ CSV</a>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="cs-table">
+          <thead><tr id="cs-head"></tr></thead>
+          <tbody id="cs-body">
+            <tr><td class="empty" colspan="8">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="summary">
+        <div class="metric"><span>Total courts</span><strong id="metric-courts">0</strong></div>
+        <div class="metric"><span>Visible rows</span><strong id="metric-visible">0</strong></div>
+        <div class="metric"><span>Fields shown</span><strong id="metric-fields">0</strong></div>
+      </div>
+    </section>
+
+    <!-- Event Traces -->
+    <section class="panel" aria-labelledby="et-title">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="et-title">Event Traces</h2>
+          <p>What changed, when, and for how long</p>
+        </div>
+        <div class="controls">
+          <input id="et-court-filter" type="text" placeholder="Filter court ID…">
+          <select id="et-limit" aria-label="Row limit">
+            <option value="50">50 rows</option>
+            <option value="200" selected>200 rows</option>
+            <option value="500">500 rows</option>
+            <option value="2000">2000 rows</option>
+          </select>
+          <button id="et-export" type="button">⬇ CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="et-table">
+          <thead>
+            <tr>
+              <th class="dev-col">ID</th>
+              <th>Court</th>
+              <th>Field</th>
+              <th>Change</th>
+              <th>Duration</th>
+              <th>Observed</th>
+              <th class="dev-col">Start Time</th>
+              <th class="dev-col">End Time</th>
+            </tr>
+          </thead>
+          <tbody id="et-body">
+            <tr><td class="empty" colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const BASE = window.location.origin;
+document.getElementById("api-base").textContent = BASE;
+
+// ── Fields ────────────────────────────────────────────────────────────────────
+// User-facing names for known fields
+const FIELD_LABELS = {
+  room_no:                  "Room",
+  judge_names:              "Judge(s)",
+  cause_list_type_name:     "List Type",
+  cause_list_sr_no:         "Serial No.",
+  case_no_string:           "Case No.",
+  pass_over:                "Pass Over",
+  message:                  "Message",
+  hearing_date:             "Hearing Date",
+  // dev-only
+  court_no:                 "court_no",
+  side_short_form:          "side_short",
+  side:                     "Side",
+  cause_list_type:          "list_type_code",
+  commercial:               "commercial",
+  hearing_last_modified:    "last_modified",
+  other_establishment_hearing: "other_estab",
+  vc_link:                  "VC Link",
+};
+
+// Fields visible in user mode (ordered)
+const USER_FIELDS = [
+  "room_no",
+  "judge_names",
+  "cause_list_type_name",
+  "cause_list_sr_no",
+  "case_no_string",
+  "pass_over",
+  "message",
+  "hearing_date",
+];
+
+// Fields only in dev mode
+const DEV_ONLY_FIELDS = [
+  "court_no",
+  "side_short_form",
+  "side",
+  "cause_list_type",
+  "commercial",
+  "hearing_last_modified",
+  "other_establishment_hearing",
+  "vc_link",
+];
+
+// Dev-only event trace field names
+const DEV_FIELD_NAMES = new Set(["__present__", ...DEV_ONLY_FIELDS.map(f => f)]);
+
+// ── Mode ──────────────────────────────────────────────────────────────────────
+let devMode = false;
+
+function setMode(dev) {
+  devMode = dev;
+  document.body.classList.toggle("dev-mode", dev);
+  document.getElementById("toggle-user").className = dev ? "" : "active-user";
+  document.getElementById("toggle-dev").className  = dev ? "active-dev" : "";
+  renderCurrentState();
+  renderEventTraces();
+}
+
+document.getElementById("toggle-user").addEventListener("click", () => setMode(false));
+document.getElementById("toggle-dev").addEventListener("click",  () => setMode(true));
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const appState = { current: [], traces: [], timer: null };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function safe(v) {
+  return String(v ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString();
+}
+
+function fmtDuration(sec) {
+  if (sec == null) return "—";
+  sec = Math.max(0, Math.floor(Number(sec)));
+  if (sec < 60)   return sec + "s";
+  if (sec < 3600) return Math.floor(sec/60) + "m " + (sec%60) + "s";
+  return Math.floor(sec/3600) + "h " + Math.floor((sec%3600)/60) + "m";
+}
+
+function fieldLabel(key) {
+  return FIELD_LABELS[key] || key;
+}
+
+// ── Health ────────────────────────────────────────────────────────────────────
+async function checkHealth() {
+  const dot  = document.getElementById("health-dot");
+  const text = document.getElementById("health-text");
+  try {
+    const r = await fetch(BASE + "/health");
+    dot.className  = r.ok ? "dot" : "dot stale";
+    text.textContent = r.ok ? "API online" : "API issue (" + r.status + ")";
+  } catch {
+    dot.className = "dot dead";
+    text.textContent = "API unreachable";
+  }
+}
+
+// ── Current State ─────────────────────────────────────────────────────────────
+async function loadCurrentState() {
+  try {
+    const r = await fetch(BASE + "/current-state");
+    appState.current = await r.json();
+    renderCurrentState();
+  } catch {
+    document.getElementById("cs-head").innerHTML = "";
+    document.getElementById("cs-body").innerHTML = "<tr><td class='empty' colspan='8'>Could not load data.</td></tr>";
+    updateMetrics([], []);
+  }
+}
+
+function renderCurrentState() {
+  const query = document.getElementById("cs-filter").value.trim().toLowerCase();
+  const rows  = appState.current.filter(r => !query || String(r.court_id || "").toLowerCase().includes(query));
+
+  if (!rows.length) {
+    document.getElementById("cs-head").innerHTML = "";
+    document.getElementById("cs-body").innerHTML = "<tr><td class='empty' colspan='8'>No courts match filter.</td></tr>";
+    updateMetrics([], []);
+    return;
+  }
+
+  // Columns: always show court_id + user fields; dev mode adds dev-only fields
+  const visibleFields = [...USER_FIELDS];
+  const devFields     = DEV_ONLY_FIELDS;
+
+  // Build header
+  let headHTML = "<th>Court ID</th>";
+  visibleFields.forEach(f => {
+    headHTML += "<th>" + safe(fieldLabel(f)) + "</th>";
+  });
+  devFields.forEach(f => {
+    headHTML += "<th class='dev-col'>" + safe(fieldLabel(f)) + "</th>";
+  });
+  headHTML += "<th>Last Seen</th>";
+  document.getElementById("cs-head").innerHTML = headHTML;
+
+  // Build body
+  const bodyHTML = rows.map(row => {
+    const d = row.data || {};
+    let cells = "<td><span class='mono'>" + safe(row.court_id ?? "—") + "</span></td>";
+    visibleFields.forEach(f => {
+      const v = d[f];
+      cells += "<td>" + safe(v ?? (v === null ? "—" : "—")) + "</td>";
+    });
+    devFields.forEach(f => {
+      cells += "<td class='dev-col dim'>" + safe(d[f] ?? "—") + "</td>";
+    });
+    cells += "<td class='dim'>" + safe(fmtDate(row.last_seen_time)) + "</td>";
+    return "<tr>" + cells + "</tr>";
+  }).join("");
+
+  document.getElementById("cs-body").innerHTML = bodyHTML;
+
+  const shownFieldCount = visibleFields.length + (devMode ? devFields.length : 0);
+  updateMetrics(rows, shownFieldCount);
+}
+
+function updateMetrics(rows, fieldCount) {
+  document.getElementById("metric-courts").textContent  = String(appState.current.length);
+  document.getElementById("metric-visible").textContent = String(rows.length);
+  document.getElementById("metric-fields").textContent  = String(fieldCount);
+}
+
+// ── Event Traces ──────────────────────────────────────────────────────────────
+async function loadEventTraces() {
+  const limit  = document.getElementById("et-limit").value;
+  const court  = document.getElementById("et-court-filter").value.trim();
+  let url = BASE + "/event-traces?limit=" + encodeURIComponent(limit);
+  if (court) url += "&court_id=" + encodeURIComponent(court);
+  try {
+    const r = await fetch(url);
+    appState.traces = await r.json();
+    renderEventTraces();
+  } catch {
+    document.getElementById("et-body").innerHTML = "<tr><td class='empty' colspan='6'>Could not load traces.</td></tr>";
+  }
+}
+
+function renderEventTraces() {
+  if (!appState.traces.length) {
+    document.getElementById("et-body").innerHTML = "<tr><td class='empty' colspan='6'>No events found.</td></tr>";
+    return;
+  }
+
+  const bodyHTML = appState.traces.map(row => {
+    const isPresence = row.field_name === "__present__";
+    const isDev      = DEV_FIELD_NAMES.has(row.field_name);
+
+    // In user mode, skip dev-only fields (presence + technical)
+    if (!devMode && isDev) return "";
+
+    let badge;
+    if (isPresence && row.new_value === "1") {
+      badge = "<span class='badge badge-appear'>Appeared</span>";
+    } else if (isPresence) {
+      badge = "<span class='badge badge-disappear'>Disappeared</span>";
+    } else if (isDev) {
+      badge = "<span class='badge badge-dev-field'>" + safe(row.field_name) + "</span>";
+    } else {
+      badge = "<span class='badge badge-field'>" + safe(fieldLabel(row.field_name)) + "</span>";
+    }
+
+    const change = isPresence
+      ? "<span class='muted-change'>Presence changed</span>"
+      : "<span class='muted-change'>" + safe(row.old_value ?? "∅") + "</span> → <strong>" + safe(row.new_value ?? "∅") + "</strong>";
+
+    return "<tr>"
+      + "<td class='dev-col dim'>" + safe(row.id ?? "—") + "</td>"
+      + "<td><span class='mono'>" + safe(row.court_id ?? "—") + "</span></td>"
+      + "<td>" + badge + "</td>"
+      + "<td>" + change + "</td>"
+      + "<td class='dim'>" + safe(fmtDuration(row.duration_seconds)) + "</td>"
+      + "<td class='dim'>" + safe(fmtDate(row.observed_time)) + "</td>"
+      + "<td class='dev-col dim'>" + safe(row.start_time ?? "—") + "</td>"
+      + "<td class='dev-col dim'>" + safe(row.end_time ?? "—") + "</td>"
+      + "</tr>";
+  }).join("");
+
+  document.getElementById("et-body").innerHTML = bodyHTML || "<tr><td class='empty' colspan='6'>No user-visible events. Switch to Dev mode to see all.</td></tr>";
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportEventTraces() {
+  const limit = document.getElementById("et-limit").value;
+  const court = document.getElementById("et-court-filter").value.trim();
+  let url = BASE + "/export/event-traces.csv?limit=" + encodeURIComponent(limit);
+  if (court) url += "&court_id=" + encodeURIComponent(court);
+  window.location.href = url;
+  showToast("CSV download started");
+}
+
+// ── Refresh ───────────────────────────────────────────────────────────────────
+function startAutoRefresh(sec) {
+  if (appState.timer) clearInterval(appState.timer);
+  document.getElementById("interval-display").textContent = sec === 0 ? "Off" : sec + "s";
+  if (sec > 0) appState.timer = setInterval(refreshAll, sec * 1000);
+}
+
+async function refreshAll() {
+  await Promise.all([checkHealth(), loadCurrentState(), loadEventTraces()]);
+  document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
+}
+
+// ── Wire up ───────────────────────────────────────────────────────────────────
+document.getElementById("refresh-now").addEventListener("click", refreshAll);
+document.getElementById("refresh-interval").addEventListener("change", e => startAutoRefresh(Number(e.target.value)));
+document.getElementById("cs-filter").addEventListener("input", renderCurrentState);
+document.getElementById("et-court-filter").addEventListener("input", loadEventTraces);
+document.getElementById("et-limit").addEventListener("change", loadEventTraces);
+document.getElementById("et-export").addEventListener("click", exportEventTraces);
+
+refreshAll();
+startAutoRefresh(15);
+</script>
+</body>
+</html>

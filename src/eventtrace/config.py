@@ -37,7 +37,7 @@ class Settings:
         if key_fields is None:
             key_fields = tuple(
                 f.strip()
-                for f in _get_env("CHD_KEY_FIELDS", "Court").split(",")
+                for f in _get_env("CHD_KEY_FIELDS", "court_no").split(",")
                 if f.strip()
             )
         self.key_fields = key_fields
