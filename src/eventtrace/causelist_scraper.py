@@ -80,3 +80,24 @@ def scrape_and_store_vc_links(for_date: date, settings: Settings, db: DB) -> dic
     for room_no, zoom_url in links.items():
         db.upsert_vc_zoom_link(date_str, room_no, zoom_url, now)
     return links
+
+
+def main() -> None:
+    """CLI entry point: chd-scrape-vc [YYYY-MM-DD]"""
+    import sys
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from .config import Settings
+    settings = Settings()
+    db = DB(settings.db_path)
+    db.ensure_schema()
+
+    if len(sys.argv) > 1:
+        for_date = date.fromisoformat(sys.argv[1])
+    else:
+        from datetime import timedelta
+        for_date = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
+
+    links = scrape_and_store_vc_links(for_date, settings, db)
+    print(f"Scraped {len(links)} VC links for {for_date}:")
+    for room_no, url in sorted(links.items(), key=lambda x: x[0].zfill(5)):
+        print(f"  Room {room_no}: {url}")

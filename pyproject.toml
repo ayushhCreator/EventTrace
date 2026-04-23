@@ -8,12 +8,16 @@ dependencies = [
   "playwright>=1.44.0",
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.27.0",
+  "python-telegram-bot>=21.0",
+  "httpx>=0.27.0",
 ]
 
 [project.scripts]
 chd-init-session = "eventtrace.init_session:main"
 chd-run-monitor = "eventtrace.run_monitor:main"
 chd-api = "eventtrace.api:main"
+chd-bot = "eventtrace.telegram_bot:main"
+chd-scrape-vc = "eventtrace.causelist_scraper:main"
 
 court-display-init-session = "eventtrace.init_session:main"
 court-display-run-monitor = "eventtrace.run_monitor:main"
