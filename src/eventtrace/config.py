@@ -42,7 +42,7 @@ class Settings:
             )
         self.key_fields = key_fields
         self.poll_seconds = poll_seconds if poll_seconds is not None else _get_env_int("CHD_POLL_SECONDS", 15)
-        self.db_path = db_path or _get_env("CHD_DB_PATH", "./eventtrace.sqlite3")
+        self.db_path = db_path or _get_env("CHD_DB_PATH", "./data/eventtrace.sqlite3")
         self.storage_state_path = storage_state_path or _get_env(
             "CHD_STORAGE_STATE_PATH", "./.state/storage_state.json"
         )

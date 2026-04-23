@@ -47,7 +47,7 @@
   }
 
   .shell {
-    max-width: 1320px;
+   
     margin: 0 auto;
     padding: 24px;
     display: grid;
@@ -434,10 +434,11 @@
 
   <header class="topbar">
     <div class="brand">
-      <h1>EventTrace Dashboard</h1>
-      <p>Live view — Calcutta High Court display board changes</p>
+      <h1>EventTrace — Admin</h1>
+      <p>Change history &amp; developer view — Calcutta High Court</p>
     </div>
     <div class="topbar-right">
+      <a href="/" style="font-size:0.8rem;color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:5px 12px;">← Display Board</a>
       <div class="api-chip">API: <span id="api-base">—</span></div>
       <div class="mode-toggle" id="mode-toggle" title="Switch view mode">
         <span id="toggle-user" class="active-user">User</span>
@@ -449,6 +450,10 @@
   <div class="dev-banner">
     <strong>Developer Mode</strong>
     — all fields shown including technical columns (court_no, cause_list_type, side codes, etc.)
+  </div>
+
+  <div id="stale-banner" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:12px;padding:10px 16px;font-size:0.83rem;color:#856404;">
+    ⚠ Showing data from <strong id="stale-date"></strong> — monitor not running or court closed today. Run <code>chd-run-monitor</code> to get live data.
   </div>
 
   <section class="status-row" aria-label="Live status">
@@ -477,6 +482,9 @@
           <p>Latest snapshot of each court bench</p>
         </div>
         <div class="controls">
+          <select id="cs-date-filter" aria-label="Filter by date" style="min-width:160px;">
+            <option value="">All dates</option>
+          </select>
           <input id="cs-filter" type="text" placeholder="Filter courts…" aria-label="Filter courts">
           <a class="btn" href="/export/current-state.csv" download>⬇ CSV</a>
         </div>
@@ -746,12 +754,27 @@ async function checkHealth() {
   }
 }
 
+// ── Stale banner ──────────────────────────────────────────────────────────────
+function checkStaleBanner() {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const latest = appState.current.reduce((max, r) => {
+    const d = (r.data || {}).hearing_date || '';
+    return d > max ? d : max;
+  }, '');
+  const isStale = latest && latest < today;
+  const banner = document.getElementById("stale-banner");
+  banner.style.display = isStale ? '' : 'none';
+  if (isStale) document.getElementById("stale-date").textContent = latest;
+}
+
 // ── Current State ─────────────────────────────────────────────────────────────
 async function loadCurrentState() {
   try {
     const r = await fetch(BASE + "/current-state");
     appState.current = await r.json();
     buildCourtMap(appState.current);
+    populateCsDateFilter();
+    checkStaleBanner();
     renderCurrentState();
   } catch {
     document.getElementById("cs-head").innerHTML = "";
@@ -760,8 +783,27 @@ async function loadCurrentState() {
   }
 }
 
+function populateCsDateFilter() {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const dates = [...new Set(
+    appState.current.map(r => (r.data || {}).hearing_date).filter(Boolean)
+  )].sort().reverse();
+
+  const sel = document.getElementById("cs-date-filter");
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All dates</option>';
+  dates.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d + (d === today ? " (today)" : "");
+    sel.appendChild(opt);
+  });
+  if (prev && dates.includes(prev)) sel.value = prev;
+}
+
 function renderCurrentState() {
-  const query = document.getElementById("cs-filter").value.trim().toLowerCase();
+  const query      = document.getElementById("cs-filter").value.trim().toLowerCase();
+  const dateFilter = document.getElementById("cs-date-filter").value;
 
   // Sort by room_no ascending (numeric)
   const sorted = [...appState.current].sort((a, b) => {
@@ -771,8 +813,10 @@ function renderCurrentState() {
   });
 
   const rows = sorted.filter(r => {
+    const d = r.data || {};
+    if (dateFilter && d.hearing_date !== dateFilter) return false;
     if (!query) return true;
-    const room = String((r.data || {}).room_no ?? "");
+    const room = String(d.room_no ?? "");
     return room.includes(query) || String(r.court_id || "").toLowerCase().includes(query);
   });
 
@@ -1007,6 +1051,7 @@ function renderHistoryDay(rows, date) {
 document.getElementById("refresh-now").addEventListener("click", refreshAll);
 document.getElementById("refresh-interval").addEventListener("change", e => startAutoRefresh(Number(e.target.value)));
 document.getElementById("cs-filter").addEventListener("input", renderCurrentState);
+document.getElementById("cs-date-filter").addEventListener("change", renderCurrentState);
 
 // Delegate info-btn clicks on the current-state table
 document.getElementById("cs-body").addEventListener("click", e => {

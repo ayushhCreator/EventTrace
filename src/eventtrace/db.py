@@ -4,7 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 
 def utc_now() -> datetime:
@@ -94,6 +94,31 @@ class DB:
                   ON event_trace(observed_time DESC);
                 CREATE INDEX IF NOT EXISTS idx_event_trace_court
                   ON event_trace(court_id, observed_time DESC);
+
+                CREATE TABLE IF NOT EXISTS vc_zoom_link (
+                  date       TEXT NOT NULL,
+                  room_no    TEXT NOT NULL,
+                  zoom_url   TEXT NOT NULL,
+                  scraped_at TEXT NOT NULL,
+                  PRIMARY KEY (date, room_no)
+                );
+
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                  telegram_id  TEXT NOT NULL,
+                  room_no      TEXT NOT NULL,
+                  target_serial INTEGER NOT NULL,
+                  look_ahead   INTEGER NOT NULL DEFAULT 5,
+                  active       INTEGER NOT NULL DEFAULT 1,
+                  created_at   TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS notification_log (
+                  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                  sub_id    INTEGER REFERENCES subscriptions(id),
+                  sent_at   TEXT NOT NULL,
+                  payload   TEXT NOT NULL
+                );
                 """
             )
 
@@ -274,3 +299,80 @@ class DB:
                 (date_str,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── VC Zoom Links ────────────────────────────────────────────────────────
+
+    def upsert_vc_zoom_link(self, date: str, room_no: str, zoom_url: str, scraped_at: datetime) -> None:
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO vc_zoom_link(date, room_no, zoom_url, scraped_at)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(date, room_no) DO UPDATE SET
+                  zoom_url=excluded.zoom_url,
+                  scraped_at=excluded.scraped_at
+                """,
+                (date, room_no, zoom_url, iso(scraped_at)),
+            )
+
+    def get_vc_zoom_links(self, date: str) -> dict[str, str]:
+        """Returns {room_no: zoom_url} for given date (YYYY-MM-DD IST)."""
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT room_no, zoom_url FROM vc_zoom_link WHERE date=?",
+                (date,),
+            ).fetchall()
+        return {r["room_no"]: r["zoom_url"] for r in rows}
+
+    # ── Subscriptions ────────────────────────────────────────────────────────
+
+    def add_subscription(
+        self, telegram_id: str, room_no: str, target_serial: int, look_ahead: int
+    ) -> int:
+        with self.connect() as con:
+            cur = con.execute(
+                """
+                INSERT INTO subscriptions(telegram_id, room_no, target_serial, look_ahead, active, created_at)
+                VALUES(?, ?, ?, ?, 1, ?)
+                """,
+                (telegram_id, room_no, target_serial, look_ahead, iso(utc_now())),
+            )
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def remove_subscription(self, telegram_id: str, room_no: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE subscriptions SET active=0 WHERE telegram_id=? AND room_no=?",
+                (telegram_id, room_no),
+            )
+
+    def list_active_subscriptions(self) -> list[dict[str, Any]]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT * FROM subscriptions WHERE active=1"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_user_subscriptions(self, telegram_id: str) -> list[dict[str, Any]]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT * FROM subscriptions WHERE telegram_id=? AND active=1",
+                (telegram_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def was_notified_today(self, sub_id: int) -> bool:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT 1 FROM notification_log WHERE sub_id=? AND DATE(sent_at)=?",
+                (sub_id, today),
+            ).fetchone()
+        return row is not None
+
+    def log_notification(self, sub_id: int, payload: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "INSERT INTO notification_log(sub_id, sent_at, payload) VALUES(?, ?, ?)",
+                (sub_id, iso(utc_now()), payload),
+            )
