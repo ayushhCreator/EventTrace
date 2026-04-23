@@ -527,10 +527,11 @@
         <th class="center" style="width:72px">Court</th>
         <th style="width:28%">Judge(s) Coram</th>
         <th>Serial No(s) &amp; Cases</th>
+        <th style="width:110px;white-space:nowrap;">Duration / Seen</th>
       </tr>
     </thead>
     <tbody id="board-body">
-      <tr class="empty-row"><td colspan="3">Loading hearing data…</td></tr>
+      <tr class="empty-row"><td colspan="4">Loading hearing data…</td></tr>
     </tbody>
   </table>
   <div style="font-size:0.75rem;color:var(--ink-light);text-align:center;margin-top:10px;">
@@ -632,19 +633,23 @@ function esc(s) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let allRows = [];       // all rows fetched from API
-let vcMap = {};         // {room_no: zoom_url}
+let allRows = [];        // all rows fetched from API
+let vcMap = {};          // {room_no: zoom_url}
+let durationMap = {};    // {court_id: serial_start_time ISO}
 let filterText = '';
-let selectedDate = '';  // YYYY-MM-DD filter; '' = show latest per court
+let selectedDate = '';   // YYYY-MM-DD filter; '' = show latest per court
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
 function renderRow(row, idx, isToday) {
-  const prefix = sidePrefix(row);
-  const sr     = row.cause_list_sr_no || '—';
-  const zoom   = vcMap[String(row.room_no)];
-  const caseNo = row.case_no_string || '';
-  const judges = row.judge_names || '—';
+  const prefix   = sidePrefix(row);
+  const sr       = row.cause_list_sr_no || '—';
+  const zoom     = vcMap[String(row.room_no)];
+  const caseNo   = row.case_no_string || '';
+  const judges   = row.judge_names || '—';
+  const durStart = durationMap[row._court_id] || null;
+  const durTxt   = durStart ? durationStr(durStart) : '—';
+  const seenTxt  = row._last_seen ? timeAgo(row._last_seen) : '—';
 
   const passOver = row.pass_over ? `<div class="pass-over">⇒ Passover: ${esc(row.pass_over)}</div>` : '';
   const msg      = row.message   ? `<div class="court-message">ℹ ${esc(row.message)}</div>`       : '';
@@ -702,8 +707,11 @@ function renderRow(row, idx, isToday) {
           </div>
           ${passOver}
           ${msg}
-          ${row._last_seen ? `<div style="font-size:0.7rem;color:var(--ink-light);margin-top:3px;">⏱ ${timeAgo(row._last_seen)}</div>` : ''}
         </div>
+      </td>
+      <td style="vertical-align:middle;white-space:nowrap;">
+        <div style="font-size:0.82rem;font-weight:700;color:var(--ink);">${esc(durTxt)}</div>
+        <div style="font-size:0.7rem;color:var(--ink-light);margin-top:2px;">seen ${esc(seenTxt)}</div>
       </td>
     </tr>`;
 }
@@ -785,15 +793,17 @@ async function fetchAndRender() {
     const today = todayIST();
     const vcDate = selectedDate || today;
 
-    const [csResp, vcResp] = await Promise.all([
+    const [csResp, vcResp, durResp] = await Promise.all([
       fetch(API + '/current-state'),
       fetch(API + '/vc-links?date=' + vcDate),
+      fetch(API + '/field-durations'),
     ]);
 
     if (!csResp.ok) throw new Error('current-state HTTP ' + csResp.status);
     const states = await csResp.json();
 
     vcMap = vcResp.ok ? await vcResp.json() : {};
+    durationMap = durResp.ok ? await durResp.json() : {};
 
     // Flatten nested data
     allRows = states.map(s => ({ ...s.data, _last_seen: s.last_seen_time, _court_id: s.court_id }));
@@ -826,7 +836,7 @@ function renderTable(today) {
     const msg = !selectedDate
       ? `No court hearing in progress for today (${activeDate})`
       : `No hearing data for ${activeDate}`;
-    body.innerHTML = `<tr class="empty-row"><td colspan="3">${msg}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="4">${msg}</td></tr>`;
     document.getElementById('court-count').textContent = '0 courts';
     document.getElementById('health-dot').className = 'dot stale';
     document.getElementById('last-updated').textContent = 'No data';

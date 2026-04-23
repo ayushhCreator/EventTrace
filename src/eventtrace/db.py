@@ -259,6 +259,14 @@ class DB:
             ).fetchall()
         return {r["field_name"] for r in rows}
 
+    def list_serial_start_times(self) -> dict[str, str]:
+        """Returns {court_id: start_time ISO} for the current cause_list_sr_no of every court."""
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT court_id, start_time FROM field_state WHERE field_name='cause_list_sr_no'"
+            ).fetchall()
+        return {r["court_id"]: r["start_time"] for r in rows}
+
     def known_courts(self) -> set[str]:
         with self.connect() as con:
             rows = con.execute("SELECT court_id FROM current_state").fetchall()

@@ -58,6 +58,11 @@ def create_app() -> FastAPI:
     def field_state(court_id: str) -> list[dict]:
         return db.list_field_state(court_id)
 
+    @app.get("/field-durations")
+    def field_durations() -> dict[str, str]:
+        """Returns {court_id: serial_start_time ISO} for all courts."""
+        return db.list_serial_start_times()
+
     # ── History ──────────────────────────────────────────────────────────────
 
     @app.get("/history/dates")
@@ -137,4 +142,6 @@ def main() -> None:
 
     host = os.getenv("CHD_API_HOST", "127.0.0.1")
     port = int(os.getenv("CHD_API_PORT", "8009"))
-    uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=False)
+    reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
+    reload_enabled = reload_env in {"1", "true", "yes", "on"}
+    uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=reload_enabled)
