@@ -113,7 +113,15 @@
     font-size: 0.78rem;
   }
   .status-bar .left { display: flex; align-items: center; gap: 10px; flex: 1; flex-wrap: wrap; }
-  .status-bar .right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .status-bar .right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
 
   .dot {
     width: 8px; height: 8px; border-radius: 50%;
@@ -159,6 +167,9 @@
     max-width: 1200px;
     margin: 16px auto;
     padding: 0 12px 24px;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .board-table {
@@ -168,6 +179,7 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     overflow: hidden;
+    table-layout: fixed;
   }
 
   .board-table thead tr {
@@ -201,6 +213,8 @@
     padding: 10px 12px;
     vertical-align: top;
     font-size: 0.84rem;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
   }
   .board-table td.center { text-align: center; }
 
@@ -251,6 +265,10 @@
 
   /* Judge names */
   .judges { font-size: 0.82rem; color: var(--ink-2); line-height: 1.45; }
+
+  .mobile-meta {
+    display: none;
+  }
 
   /* Serial cell */
   .serial-wrap { display: flex; flex-direction: column; gap: 5px; }
@@ -397,14 +415,63 @@
 
   /* ── Responsive ──────────────────────────────────────────────────────── */
   @media (max-width: 700px) {
-    .board-table th:nth-child(2),
-    .board-table td:nth-child(2) { display: none; } /* hide judges on tiny screens */
+    .status-bar {
+      padding: 8px;
+      gap: 8px;
+    }
+    .status-bar .left,
+    .status-bar .right {
+      flex: 0 0 100%;
+      width: 100%;
+    }
+    .status-bar .right {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      align-items: stretch;
+    }
+    #date-select,
+    #causelist-link,
+    #filter-input,
+    .refresh-btn {
+      width: 100%;
+      min-width: 0;
+    }
+    #causelist-link {
+      grid-column: 1 / -1;
+      justify-content: center;
+      text-align: center;
+    }
+    #filter-input { width: 100%; }
     .table-wrap { padding: 0 6px 20px; margin: 10px auto; }
-    #filter-input { width: 110px; }
+    .board-table {
+      min-width: 640px;
+    }
+    .board-table th,
+    .board-table td {
+      padding: 8px;
+    }
+    .serial-main {
+      row-gap: 4px;
+    }
+    .mobile-meta { display: none; }
   }
   @media (max-width: 480px) {
     .nav-logo { display: none; }
     nav a { padding: 12px 9px; font-size: 0.73rem; }
+    .status-bar .right {
+      grid-template-columns: 1fr;
+    }
+    #causelist-link {
+      font-size: 0.74rem;
+      padding: 0 8px;
+    }
+    .board-table th {
+      font-size: 0.68rem;
+    }
+    .serial-num {
+      font-size: 0.92rem;
+    }
   }
 </style>
 </head>
@@ -537,6 +604,24 @@ function formatIST(str) {
   } catch { return str; }
 }
 
+function timeAgo(isoStr) {
+  if (!isoStr) return '—';
+  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (diff < 60)  return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
+  return m ? h + 'h ' + m + 'm ago' : h + 'h ago';
+}
+
+function durationStr(isoStartStr) {
+  if (!isoStartStr) return '—';
+  const diff = Math.floor((Date.now() - new Date(isoStartStr).getTime()) / 1000);
+  if (diff < 60)  return diff + 's';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm';
+  const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
+  return m ? h + 'h ' + m + 'm' : h + 'h';
+}
+
 function todayIST() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
@@ -559,6 +644,7 @@ function renderRow(row, idx, isToday) {
   const sr     = row.cause_list_sr_no || '—';
   const zoom   = vcMap[String(row.room_no)];
   const caseNo = row.case_no_string || '';
+  const judges = row.judge_names || '—';
 
   const passOver = row.pass_over ? `<div class="pass-over">⇒ Passover: ${esc(row.pass_over)}</div>` : '';
   const msg      = row.message   ? `<div class="court-message">ℹ ${esc(row.message)}</div>`       : '';
@@ -582,6 +668,15 @@ function renderRow(row, idx, isToday) {
     ? `<div style="font-size:0.65rem;color:#e67e22;margin-top:2px;">${esc(row.hearing_date)}</div>`
     : '';
 
+  const mobileMeta = `
+    <div class="mobile-meta">
+      <div class="tags">
+        <span class="tag tag-${esc(prefix)}">${esc(prefix)}</span>
+        ${commercialTag(row.commercial)}
+      </div>
+      <div class="judges">${esc(judges)}</div>
+    </div>`;
+
   return `
     <tr data-room="${esc(row.room_no)}" data-judges="${esc((row.judge_names||'').toLowerCase())}" data-side="${esc(prefix)}" data-idx="${idx}">
       <td class="center">
@@ -598,6 +693,7 @@ function renderRow(row, idx, isToday) {
       </td>
       <td>
         <div class="serial-wrap">
+          ${mobileMeta}
           <div class="serial-main">
             <span class="serial-prefix">${esc(prefix)}</span>
             <span class="serial-num">${esc(sr)}</span>
@@ -606,6 +702,7 @@ function renderRow(row, idx, isToday) {
           </div>
           ${passOver}
           ${msg}
+          ${row._last_seen ? `<div style="font-size:0.7rem;color:var(--ink-light);margin-top:3px;">⏱ ${timeAgo(row._last_seen)}</div>` : ''}
         </div>
       </td>
     </tr>`;
@@ -803,12 +900,13 @@ function showCase(event, idx) {
   popup.classList.add('open');
 }
 
-function showInfo(event, idx) {
+async function showInfo(event, idx) {
   event.stopPropagation();
   const row = rowStore[idx];
   if (!row) return;
   const com   = row.commercial === 'C' ? 'Commercial Matters' : row.commercial === 'IP' ? 'IP Rights' : '—';
   const popup = document.getElementById('info-popup');
+
   document.getElementById('info-popup-body').innerHTML = `
     <div class="popup-row"><span class="popup-label">Side</span><span class="popup-val">${esc(row.side)}</span></div>
     <div class="popup-row"><span class="popup-label">List type</span><span class="popup-val">${esc(row.cause_list_type_name)}</span></div>
@@ -816,10 +914,35 @@ function showInfo(event, idx) {
     <div class="popup-row"><span class="popup-label">Location</span><span class="popup-val">${esc(row.vc_link || '—')}</span></div>
     <div class="popup-row"><span class="popup-label">Date</span><span class="popup-val">${esc(row.hearing_date)}</span></div>
     <div class="popup-row"><span class="popup-label">Speciality</span><span class="popup-val">${esc(com)}</span></div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">
+    <div class="popup-row"><span class="popup-label">Observed</span><span class="popup-val">${esc(formatIST(row._last_seen))} <span style="color:var(--ink-light);font-weight:400;">(${timeAgo(row._last_seen)})</span></span></div>
+    <div class="popup-row" id="info-duration-row"><span class="popup-label">Duration</span><span class="popup-val" id="info-duration-val" style="color:var(--ink-light);">loading…</span></div>
   `;
+
   closeAllPopups();
   positionPopup(popup, event);
   popup.classList.add('open');
+
+  // Fetch duration from field_state async
+  if (row._court_id) {
+    try {
+      const resp = await fetch(API + '/field-state/' + encodeURIComponent(row._court_id));
+      if (resp.ok) {
+        const fields = await resp.json();
+        const srField = fields.find(f => f.field_name === 'cause_list_sr_no');
+        const el = document.getElementById('info-duration-val');
+        if (el) {
+          if (srField && srField.start_time) {
+            const dur = durationStr(srField.start_time);
+            const since = formatIST(srField.start_time);
+            el.innerHTML = `<strong>${esc(dur)}</strong> <span style="color:var(--ink-light);font-weight:400;">since ${esc(since)}</span>`;
+          } else {
+            el.textContent = '—';
+          }
+        }
+      }
+    } catch { /* ignore, duration stays as — */ }
+  }
 }
 
 function showVC(event, idx) {
