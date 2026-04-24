@@ -196,6 +196,12 @@
     white-space: nowrap;
   }
   .board-table th.center { text-align: center; }
+  .board-table th.col-duration {
+    width: 150px;
+    text-align: right;
+    padding-right: 16px;
+    letter-spacing: 0.03em;
+  }
 
   .board-table tbody tr {
     border-bottom: 1px solid var(--border);
@@ -217,6 +223,24 @@
     overflow-wrap: anywhere;
   }
   .board-table td.center { text-align: center; }
+  .board-table td.col-duration {
+    vertical-align: middle;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: 16px;
+  }
+
+  .duration-main {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .duration-seen {
+    font-size: 0.7rem;
+    color: var(--ink-light);
+    margin-top: 2px;
+  }
 
   /* Court cell */
   .court-num {
@@ -401,6 +425,62 @@
   /* ── Empty / loading states ──────────────────────────────────────────── */
   .empty-row td { text-align: center; color: var(--ink-light); padding: 32px; font-size: 0.9rem; }
 
+  /* ── Completed section ───────────────────────────────────────────────────── */
+  .completed-section {
+    max-width: 1200px;
+    margin: 0 auto 24px;
+    padding: 0 12px;
+  }
+  .completed-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 9px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    user-select: none;
+    transition: background 0.12s;
+  }
+  .completed-header:hover { background: #f0f4f9; }
+  .completed-header .done-count {
+    background: var(--success);
+    color: #fff;
+    border-radius: 99px;
+    padding: 1px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+  .completed-header .toggle-icon {
+    margin-left: auto;
+    font-size: 0.7rem;
+    opacity: 0.5;
+    transition: transform 0.15s;
+  }
+  .completed-header.open .toggle-icon { transform: rotate(180deg); }
+  .completed-wrap {
+    display: none;
+    margin-top: 6px;
+  }
+  .completed-wrap.open { display: block; }
+  .completed-wrap .board-table tbody tr { opacity: 0.72; }
+  .completed-wrap .board-table tbody tr:hover { opacity: 1; }
+  .done-badge {
+    display: inline-block;
+    background: var(--success);
+    color: #fff;
+    border-radius: 4px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    letter-spacing: 0.04em;
+    margin-top: 3px;
+  }
+
   /* ── Footer ──────────────────────────────────────────────────────────── */
   footer {
     text-align: center;
@@ -445,7 +525,7 @@
     #filter-input { width: 100%; }
     .table-wrap { padding: 0 6px 20px; margin: 10px auto; }
     .board-table {
-      min-width: 640px;
+      min-width: 720px;
     }
     .board-table th,
     .board-table td {
@@ -527,7 +607,7 @@
         <th class="center" style="width:72px">Court</th>
         <th style="width:28%">Judge(s) Coram</th>
         <th>Serial No(s) &amp; Cases</th>
-        <th style="width:110px;white-space:nowrap;">Duration / Seen</th>
+        <th class="col-duration">Duration / Seen</th>
       </tr>
     </thead>
     <tbody id="board-body">
@@ -537,6 +617,32 @@
   <div style="font-size:0.75rem;color:var(--ink-light);text-align:center;margin-top:10px;">
     Details shown as per published Cause List &nbsp;·&nbsp;
     <a href="/admin" style="color:var(--ink-light)">Developer view</a>
+  </div>
+</div>
+
+<!-- Completed section (today only) -->
+<div class="completed-section" id="completed-section" style="display:none">
+  <div class="completed-header" id="completed-toggle">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg>
+    Completed today
+    <span class="done-count" id="completed-count">0</span>
+    <span class="toggle-icon">▲</span>
+  </div>
+  <div class="completed-wrap" id="completed-wrap">
+    <table class="board-table" id="completed-table" style="margin-top:0;border-radius:0 0 var(--radius) var(--radius);">
+      <thead>
+        <tr>
+          <th class="center" style="width:72px">Court</th>
+          <th style="width:28%">Judge(s) Coram</th>
+          <th>Serial No(s) &amp; Cases</th>
+          <th class="col-duration">Duration / Seen</th>
+        </tr>
+      </thead>
+      <tbody id="completed-body"></tbody>
+    </table>
+    <div style="font-size:0.75rem;color:var(--ink-light);text-align:center;margin-top:8px;">
+      These courts finished and left the live board today
+    </div>
   </div>
 </div>
 
@@ -605,22 +711,98 @@ function formatIST(str) {
   } catch { return str; }
 }
 
-function timeAgo(isoStr) {
+function timeAgo(isoStr, refMs) {
   if (!isoStr) return '—';
-  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  const nowMs = Number.isFinite(refMs) ? refMs : Date.now();
+  const ts = new Date(isoStr).getTime();
+  if (!Number.isFinite(ts)) return '—';
+  const diff = Math.max(0, Math.floor((nowMs - ts) / 1000));
   if (diff < 60)  return diff + 's ago';
   if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
   const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
   return m ? h + 'h ' + m + 'm ago' : h + 'h ago';
 }
 
-function durationStr(isoStartStr) {
+function durationStr(isoStartStr, refMs) {
   if (!isoStartStr) return '—';
-  const diff = Math.floor((Date.now() - new Date(isoStartStr).getTime()) / 1000);
+  const endMs = Number.isFinite(refMs) ? refMs : Date.now();
+  const startMs = new Date(isoStartStr).getTime();
+  if (!Number.isFinite(startMs)) return '—';
+  const diff = Math.max(0, Math.floor((endMs - startMs) / 1000));
   if (diff < 60)  return diff + 's';
   if (diff < 3600) return Math.floor(diff / 60) + 'm';
   const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
   return m ? h + 'h ' + m + 'm' : h + 'h';
+}
+
+function expandSerials(sr) {
+  const text = String(sr || '').trim();
+  if (!text) return [];
+  const out = [];
+  for (const part of text.split(',')) {
+    const token = part.trim();
+    if (!token) continue;
+    if (token.includes('-')) {
+      const [a, b] = token.split('-').map(v => parseInt(v.trim(), 10));
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        for (let n = lo; n <= hi; n += 1) out.push(n);
+      }
+    } else {
+      const n = parseInt(token, 10);
+      if (Number.isFinite(n)) out.push(n);
+    }
+  }
+  return out;
+}
+
+function compressSerials(nums) {
+  if (!nums.length) return '';
+  const uniq = [...new Set(nums)].sort((a, b) => a - b);
+  const parts = [];
+  let start = uniq[0];
+  let end = uniq[0];
+  for (let i = 1; i < uniq.length; i += 1) {
+    const n = uniq[i];
+    if (n === end + 1) {
+      end = n;
+      continue;
+    }
+    parts.push(start === end ? String(start) : `${start}-${end}`);
+    start = end = n;
+  }
+  parts.push(start === end ? String(start) : `${start}-${end}`);
+  return parts.join(',');
+}
+
+function parseMs(isoStr) {
+  if (!isoStr) return null;
+  const ms = new Date(isoStr).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function rowRefMs(row, isToday) {
+  // Duration should reflect how long we observed the serial as current.
+  const seenMs = parseMs(row._last_seen);
+  if (seenMs !== null) return seenMs;
+  return isToday ? Date.now() : Date.now();
+}
+
+function durationStartForRow(row) {
+  const ids = Array.isArray(row._group_court_ids) && row._group_court_ids.length
+    ? row._group_court_ids
+    : (row._court_id ? [row._court_id] : []);
+  if (!ids.length) return null;
+
+  let minMs = null;
+  for (const id of ids) {
+    const iso = durationMap[id];
+    const ms = parseMs(iso);
+    if (ms === null) continue;
+    if (minMs === null || ms < minMs) minMs = ms;
+  }
+  return minMs === null ? null : new Date(minMs).toISOString();
 }
 
 function todayIST() {
@@ -636,6 +818,7 @@ function esc(s) {
 let allRows = [];        // all rows fetched from API
 let vcMap = {};          // {room_no: zoom_url}
 let durationMap = {};    // {court_id: serial_start_time ISO}
+let absentSet = new Set(); // court_ids currently absent from live board
 let filterText = '';
 let selectedDate = '';   // YYYY-MM-DD filter; '' = show latest per court
 
@@ -647,9 +830,13 @@ function renderRow(row, idx, isToday) {
   const zoom     = vcMap[String(row.room_no)];
   const caseNo   = row.case_no_string || '';
   const judges   = row.judge_names || '—';
-  const durStart = durationMap[row._court_id] || null;
-  const durTxt   = durStart ? durationStr(durStart) : '—';
-  const seenTxt  = row._last_seen ? timeAgo(row._last_seen) : '—';
+  const durStart = durationStartForRow(row);
+  const refMs = rowRefMs(row, isToday);
+  const durTxt = durStart ? durationStr(durStart, refMs) : '—';
+  const seenIso = row._last_seen || row.hearing_last_modified || '';
+  const seenTxt = seenIso
+    ? 'at ' + formatIST(seenIso)
+    : '—';
 
   const passOver = row.pass_over ? `<div class="pass-over">⇒ Passover: ${esc(row.pass_over)}</div>` : '';
   const msg      = row.message   ? `<div class="court-message">ℹ ${esc(row.message)}</div>`       : '';
@@ -709,21 +896,23 @@ function renderRow(row, idx, isToday) {
           ${msg}
         </div>
       </td>
-      <td style="vertical-align:middle;white-space:nowrap;">
-        <div style="font-size:0.82rem;font-weight:700;color:var(--ink);">${esc(durTxt)}</div>
-        <div style="font-size:0.7rem;color:var(--ink-light);margin-top:2px;">seen ${esc(seenTxt)}</div>
+      <td class="col-duration">
+        <div class="duration-main">${esc(durTxt)}</div>
+        <div class="duration-seen">seen ${esc(seenTxt)}</div>
       </td>
     </tr>`;
 }
 
 function applyFilter() {
   const q = filterText.toLowerCase().trim();
-  document.querySelectorAll('#board-body tr[data-room]').forEach(tr => {
-    const match = !q
-      || (tr.dataset.room   || '').includes(q)
-      || (tr.dataset.judges || '').includes(q)
-      || (tr.dataset.side   || '').toLowerCase().includes(q);
-    tr.style.display = match ? '' : 'none';
+  ['#board-body', '#completed-body'].forEach(sel => {
+    document.querySelectorAll(sel + ' tr[data-room]').forEach(tr => {
+      const match = !q
+        || (tr.dataset.room   || '').includes(q)
+        || (tr.dataset.judges || '').includes(q)
+        || (tr.dataset.side   || '').toLowerCase().includes(q);
+      tr.style.display = match ? '' : 'none';
+    });
   });
 }
 
@@ -756,7 +945,43 @@ function populateDateSelect(rows) {
 
 function getFilteredRows() {
   const date = selectedDate || todayIST();
-  return allRows.filter(r => r.hearing_date === date);
+  const filtered = allRows.filter(r => r.hearing_date === date);
+
+  // Match official board style: single visible row per room_no.
+  const grouped = new Map();
+  for (const r of filtered) {
+    const room = String(r.room_no || '');
+    const key = room || JSON.stringify([r.court_no, r.side_short_form, r.cause_list_type]);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        base: { ...r },
+        serials: expandSerials(r.cause_list_sr_no),
+        courtIds: [r._court_id],
+      });
+      continue;
+    }
+
+    const g = grouped.get(key);
+    g.serials.push(...expandSerials(r.cause_list_sr_no));
+    g.courtIds.push(r._court_id);
+
+    const prevMs = parseMs(g.base.hearing_last_modified) || 0;
+    const curMs = parseMs(r.hearing_last_modified) || 0;
+    if (curMs >= prevMs) {
+      g.base = { ...r };
+    }
+  }
+
+  return [...grouped.values()].map(g => {
+    const merged = { ...g.base };
+    const packed = compressSerials(g.serials);
+    if (packed) merged.cause_list_sr_no = packed;
+    merged._group_court_ids = [...new Set(g.courtIds)].filter(Boolean);
+    if (!merged._court_id && merged._group_court_ids.length) {
+      merged._court_id = merged._group_court_ids[0];
+    }
+    return merged;
+  });
 }
 
 // ── Cause list link ───────────────────────────────────────────────────────────
@@ -793,10 +1018,11 @@ async function fetchAndRender() {
     const today = todayIST();
     const vcDate = selectedDate || today;
 
-    const [csResp, vcResp, durResp] = await Promise.all([
+    const [csResp, vcResp, durResp, absentResp] = await Promise.all([
       fetch(API + '/current-state'),
       fetch(API + '/vc-links?date=' + vcDate),
       fetch(API + '/field-durations'),
+      fetch(API + '/absent-courts'),
     ]);
 
     if (!csResp.ok) throw new Error('current-state HTTP ' + csResp.status);
@@ -804,6 +1030,7 @@ async function fetchAndRender() {
 
     vcMap = vcResp.ok ? await vcResp.json() : {};
     durationMap = durResp.ok ? await durResp.json() : {};
+    absentSet = new Set(absentResp.ok ? await absentResp.json() : []);
 
     // Flatten nested data
     allRows = states.map(s => ({ ...s.data, _last_seen: s.last_seen_time, _court_id: s.court_id }));
@@ -824,19 +1051,43 @@ async function fetchAndRender() {
   }
 }
 
+function isRowCompleted(row) {
+  // A row is "completed" (left the live board) if ALL its court_ids are absent.
+  // Only meaningful for today's view.
+  const ids = Array.isArray(row._group_court_ids) && row._group_court_ids.length
+    ? row._group_court_ids
+    : (row._court_id ? [row._court_id] : []);
+  if (!ids.length) return false;
+  return ids.every(id => absentSet.has(id));
+}
+
+function renderRow_completed(row, idx, today) {
+  // Same as renderRow but court cell shows a DONE badge
+  const html = renderRow(row, idx, today);
+  return html.replace(
+    /<div class="court-info-btn"/,
+    '<div class="done-badge">DONE</div><div class="court-info-btn"'
+  );
+}
+
 function renderTable(today) {
   today = today || todayIST();
   const activeDate = selectedDate || today;
   const rows = getFilteredRows();
+  const isViewingToday = !selectedDate || selectedDate === today;
 
   rowStore.length = 0;
   const body = document.getElementById('board-body');
+  const completedBody = document.getElementById('completed-body');
+  const completedSection = document.getElementById('completed-section');
 
   if (rows.length === 0) {
     const msg = !selectedDate
       ? `No court hearing in progress for today (${activeDate})`
       : `No hearing data for ${activeDate}`;
     body.innerHTML = `<tr class="empty-row"><td colspan="4">${msg}</td></tr>`;
+    if (completedBody) completedBody.innerHTML = '';
+    if (completedSection) completedSection.style.display = 'none';
     document.getElementById('court-count').textContent = '0 courts';
     document.getElementById('health-dot').className = 'dot stale';
     document.getElementById('last-updated').textContent = 'No data';
@@ -844,22 +1095,56 @@ function renderTable(today) {
     return;
   }
 
+  // Split active vs completed (only for today; past dates show all as active)
+  const activeRows = [];
+  const completedRows = [];
+  for (const r of rows) {
+    if (isViewingToday && isRowCompleted(r)) {
+      completedRows.push(r);
+    } else {
+      activeRows.push(r);
+    }
+  }
+
   let latestMod = '';
-  const html = rows.map(r => {
+
+  // Render active rows
+  const activeHtml = activeRows.map(r => {
     const idx = rowStore.length;
     rowStore.push(r);
     if (r.hearing_last_modified && r.hearing_last_modified > latestMod) latestMod = r.hearing_last_modified;
     return renderRow(r, idx, r.hearing_date === today);
   }).join('');
+  body.innerHTML = activeHtml || `<tr class="empty-row"><td colspan="4">All courts have completed for today</td></tr>`;
 
-  body.innerHTML = html;
+  // Render completed rows
+  if (completedBody && completedSection) {
+    if (completedRows.length > 0 && isViewingToday) {
+      const compHtml = completedRows.map(r => {
+        const idx = rowStore.length;
+        rowStore.push(r);
+        return renderRow_completed(r, idx, today);
+      }).join('');
+      completedBody.innerHTML = compHtml;
+      document.getElementById('completed-count').textContent = completedRows.length;
+      completedSection.style.display = '';
+    } else {
+      completedBody.innerHTML = '';
+      completedSection.style.display = 'none';
+    }
+  }
+
   applyFilter();
 
   document.getElementById('health-dot').className = 'dot';
   document.getElementById('last-updated').textContent = latestMod
     ? 'Updated: ' + formatIST(latestMod) : 'Live';
-  document.getElementById('court-count').textContent =
-    rows.length + ' court' + (rows.length !== 1 ? 's' : '') + ' · ' + activeDate;
+
+  const totalVisible = activeRows.length;
+  const countText = isViewingToday && completedRows.length > 0
+    ? totalVisible + ' active · ' + completedRows.length + ' done · ' + activeDate
+    : rows.length + ' court' + (rows.length !== 1 ? 's' : '') + ' · ' + activeDate;
+  document.getElementById('court-count').textContent = countText;
   document.getElementById('footer-time').textContent =
     'Refreshed ' + new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
   updateCauseListLink(activeDate);
@@ -925,7 +1210,7 @@ async function showInfo(event, idx) {
     <div class="popup-row"><span class="popup-label">Date</span><span class="popup-val">${esc(row.hearing_date)}</span></div>
     <div class="popup-row"><span class="popup-label">Speciality</span><span class="popup-val">${esc(com)}</span></div>
     <hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">
-    <div class="popup-row"><span class="popup-label">Observed</span><span class="popup-val">${esc(formatIST(row._last_seen))} <span style="color:var(--ink-light);font-weight:400;">(${timeAgo(row._last_seen)})</span></span></div>
+    <div class="popup-row"><span class="popup-label">Observed</span><span class="popup-val">${esc(formatIST(row._last_seen || row.hearing_last_modified || ''))}</span></div>
     <div class="popup-row" id="info-duration-row"><span class="popup-label">Duration</span><span class="popup-val" id="info-duration-val" style="color:var(--ink-light);">loading…</span></div>
   `;
 
@@ -943,9 +1228,11 @@ async function showInfo(event, idx) {
         const el = document.getElementById('info-duration-val');
         if (el) {
           if (srField && srField.start_time) {
-            const dur = durationStr(srField.start_time);
-            const since = formatIST(srField.start_time);
-            el.innerHTML = `<strong>${esc(dur)}</strong> <span style="color:var(--ink-light);font-weight:400;">since ${esc(since)}</span>`;
+            const refMs = rowRefMs(row, row.hearing_date === todayIST());
+            const dur = durationStr(srField.start_time, refMs);
+            const start = formatIST(srField.start_time);
+            const end = formatIST(row._last_seen || row.hearing_last_modified || '');
+            el.innerHTML = `<strong>${esc(dur)}</strong><br><span style="color:var(--ink-light);font-weight:400;">start ${esc(start)} · end ${esc(end)}</span>`;
           } else {
             el.textContent = '—';
           }
@@ -984,6 +1271,12 @@ document.addEventListener('click', e => {
 });
 
 // ── Controls ──────────────────────────────────────────────────────────────────
+
+document.getElementById('completed-toggle').addEventListener('click', function() {
+  const wrap = document.getElementById('completed-wrap');
+  const isOpen = wrap.classList.toggle('open');
+  this.classList.toggle('open', isOpen);
+});
 
 document.getElementById('date-select').addEventListener('change', function() {
   selectedDate = this.value;

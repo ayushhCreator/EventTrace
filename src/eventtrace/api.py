@@ -58,6 +58,11 @@ def create_app() -> FastAPI:
     def field_state(court_id: str) -> list[dict]:
         return db.list_field_state(court_id)
 
+    @app.get("/absent-courts")
+    def absent_courts() -> list[str]:
+        """Court IDs that have left the live board (__present__ = '0')."""
+        return db.list_absent_court_ids()
+
     @app.get("/field-durations")
     def field_durations() -> dict[str, str]:
         """Returns {court_id: serial_start_time ISO} for all courts."""
