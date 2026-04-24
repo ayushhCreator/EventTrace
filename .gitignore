@@ -19,3 +19,5 @@ build/
 
 playwright-report/
 test-results/
+
+scratch/
