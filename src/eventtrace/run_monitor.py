@@ -151,20 +151,22 @@ def _dispatch_notifications(
     except ImportError:
         return
 
-    subs = db.list_active_subscriptions()
+    today_str = _today_ist().isoformat()
+    # Only subscriptions for today (or legacy NULL-date rows)
+    subs = db.list_active_subscriptions(today=today_str)
     if not subs:
         return
 
-    today_str = _today_ist().isoformat()
     vc_links = db.get_vc_zoom_links(today_str)
 
     for sub in subs:
-        if db.was_notified_today(sub["id"]):
-            continue
-
         room_no = str(sub["room_no"])
         target = int(sub["target_serial"])
         look_ahead = int(sub["look_ahead"])
+        alert_threshold = target - look_ahead
+        last_notified = sub.get("last_notified_serial")  # int or None
+
+        contact_type = sub.get("contact_type", "telegram")
 
         # Find current max serial for this room
         current_serial: int | None = None
@@ -172,7 +174,6 @@ def _dispatch_notifications(
             if str(row.get("room_no", "")) == room_no:
                 try:
                     sr = row.get("cause_list_sr_no", "")
-                    # May be a range like "15-16"; take the upper bound
                     parts = str(sr).split("-")
                     val = int(parts[-1])
                     if current_serial is None or val > current_serial:
@@ -183,27 +184,55 @@ def _dispatch_notifications(
         if current_serial is None:
             continue
 
-        if current_serial >= target - look_ahead:
-            zoom_url = vc_links.get(room_no, "")
-            payload = {
-                "room_no": room_no,
-                "current_serial": current_serial,
-                "target_serial": target,
-                "zoom_url": zoom_url,
-            }
-            try:
+        # Fire if at/past threshold AND not already notified at this serial or higher
+        should_fire = current_serial >= alert_threshold and (
+            last_notified is None or current_serial > last_notified
+        )
+        if not should_fire:
+            continue
+
+        zoom_url = vc_links.get(room_no, "")
+        payload = {
+            "room_no": room_no,
+            "current_serial": current_serial,
+            "target_serial": target,
+            "zoom_url": zoom_url,
+        }
+        try:
+            if contact_type == "telegram":
+                if not sub.get("telegram_id"):
+                    continue
                 send_notification_sync(
                     token=settings.telegram_token,
                     telegram_id=sub["telegram_id"],
                     payload=payload,
                 )
-                db.log_notification(sub["id"], json.dumps(payload))
-                log.info(
-                    "Notified %s: room %s serial %d (target %d)",
-                    sub["telegram_id"], room_no, current_serial, target,
+            elif contact_type == "whatsapp":
+                phone = sub.get("phone", "")
+                if not phone:
+                    continue
+                if not (settings.twilio_account_sid and settings.twilio_auth_token):
+                    log.warning("Twilio creds not set — skipping WhatsApp sub %s", sub["id"])
+                    continue
+                from .whatsapp_bot import send_whatsapp_sync, _build_alert_message
+                send_whatsapp_sync(
+                    account_sid=settings.twilio_account_sid,
+                    auth_token=settings.twilio_auth_token,
+                    from_number=settings.twilio_whatsapp_from,
+                    to_phone=phone,
+                    body=_build_alert_message(payload),
                 )
-            except Exception as exc:
-                log.warning("Notification failed for sub %s: %s", sub["id"], exc)
+            else:
+                continue  # web / unknown — no delivery yet
+
+            db.update_last_notified_serial(sub["id"], current_serial)
+            db.log_notification(sub["id"], json.dumps(payload))
+            log.info(
+                "Notified [%s] %s: room %s serial %d (target %d)",
+                contact_type, sub.get("telegram_id") or sub.get("phone"), room_no, current_serial, target,
+            )
+        except Exception as exc:
+            log.warning("Notification failed for sub %s: %s", sub["id"], exc)
 
 
 # ── Main loop ────────────────────────────────────────────────────────────────

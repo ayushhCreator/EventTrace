@@ -122,6 +122,19 @@ class DB:
                 """
             )
 
+            # Non-destructive column migrations — safe to re-run
+            for _col_sql in [
+                "ALTER TABLE subscriptions ADD COLUMN hearing_date TEXT",
+                "ALTER TABLE subscriptions ADD COLUMN contact_type TEXT NOT NULL DEFAULT 'telegram'",
+                "ALTER TABLE subscriptions ADD COLUMN last_notified_serial INTEGER",
+                "ALTER TABLE subscriptions ADD COLUMN display_name TEXT",
+                "ALTER TABLE subscriptions ADD COLUMN phone TEXT",
+            ]:
+                try:
+                    con.execute(_col_sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
     def upsert_current_state(self, court_id: str, row: dict[str, Any], seen_time: datetime) -> None:
         payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
         with self.connect() as con:
@@ -343,15 +356,29 @@ class DB:
     # ── Subscriptions ────────────────────────────────────────────────────────
 
     def add_subscription(
-        self, telegram_id: str, room_no: str, target_serial: int, look_ahead: int
+        self,
+        telegram_id: str,
+        room_no: str,
+        target_serial: int,
+        look_ahead: int,
+        hearing_date: str | None = None,
+        contact_type: str = "telegram",
+        display_name: str | None = None,
+        phone: str | None = None,
     ) -> int:
         with self.connect() as con:
             cur = con.execute(
                 """
-                INSERT INTO subscriptions(telegram_id, room_no, target_serial, look_ahead, active, created_at)
-                VALUES(?, ?, ?, ?, 1, ?)
+                INSERT INTO subscriptions(
+                  telegram_id, room_no, target_serial, look_ahead, active, created_at,
+                  hearing_date, contact_type, display_name, phone
+                )
+                VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 """,
-                (telegram_id, room_no, target_serial, look_ahead, iso(utc_now())),
+                (
+                    telegram_id, room_no, target_serial, look_ahead, iso(utc_now()),
+                    hearing_date, contact_type, display_name, phone,
+                ),
             )
             return cur.lastrowid  # type: ignore[return-value]
 
@@ -362,12 +389,37 @@ class DB:
                 (telegram_id, room_no),
             )
 
-    def list_active_subscriptions(self) -> list[dict[str, Any]]:
+    def remove_whatsapp_subscription(self, phone: str, room_no: str) -> None:
         with self.connect() as con:
-            rows = con.execute(
-                "SELECT * FROM subscriptions WHERE active=1"
-            ).fetchall()
+            con.execute(
+                "UPDATE subscriptions SET active=0 WHERE phone=? AND room_no=? AND contact_type='whatsapp'",
+                (phone, room_no),
+            )
+
+    def list_active_subscriptions(self, today: str | None = None) -> list[dict[str, Any]]:
+        """Returns active subscriptions, optionally filtered to hearing_date = today.
+
+        Rows with hearing_date IS NULL are always included (legacy / any-day).
+        """
+        with self.connect() as con:
+            if today:
+                rows = con.execute(
+                    "SELECT * FROM subscriptions WHERE active=1"
+                    " AND (hearing_date IS NULL OR hearing_date=?)",
+                    (today,),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT * FROM subscriptions WHERE active=1"
+                ).fetchall()
         return [dict(r) for r in rows]
+
+    def update_last_notified_serial(self, sub_id: int, serial: int) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE subscriptions SET last_notified_serial=? WHERE id=?",
+                (serial, sub_id),
+            )
 
     def list_user_subscriptions(self, telegram_id: str) -> list[dict[str, Any]]:
         with self.connect() as con:

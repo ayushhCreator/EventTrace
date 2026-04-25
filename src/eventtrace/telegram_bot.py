@@ -44,7 +44,7 @@ def send_notification_sync(token: str, telegram_id: str, payload: dict) -> None:
     lines = [
         f"🔔 *Alert — Court Room {room}*",
         f"Serial now at *{current}* — your case is *{target}*",
-        f"➡️ Time to get ready!",
+        "➡️ Time to get ready!",
     ]
     if zoom_url:
         lines += ["", f"*Join VC:*\n{zoom_url}"]
@@ -112,7 +112,14 @@ def _all_rooms_summary(db: DB) -> list[dict]:
 
 # ── Command handlers ─────────────────────────────────────────────────────────
 
-async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    # Deep link from UI: /start watch_<room>_<serial>_<ahead>_<date>
+    # e.g. /start watch_8_205_5_2026-04-25
+    payload = (ctx.args[0] if ctx.args else "").strip()
+    if payload.startswith("watch_"):
+        await _handle_deep_link_watch(update, ctx, payload)
+        return
+
     text = (
         "👋 *Welcome to Eventtrace Bot*\n"
         "Real-time Calcutta High Court display board alerts.\n\n"
@@ -129,6 +136,7 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "━━━━━━━━━━━━━━━━━━━\n"
         "*All commands:*\n"
         "/today — active courts right now\n"
+        "/daily — your alerts + all active courts\n"
         "/status `<room>` — current serial for a room\n"
         "/watch `<room> <serial>` — set alert\n"
         "/unwatch `<room>` — cancel alert\n"
@@ -136,6 +144,50 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/help — show this guide"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def _handle_deep_link_watch(
+    update: Update, ctx: ContextTypes.DEFAULT_TYPE, payload: str
+) -> None:
+    """Handle /start watch_<room>_<serial>_<ahead>_<date> from UI deep link."""
+    db: DB = ctx.bot_data["db"]
+    telegram_id = str(update.effective_user.id)
+
+    # payload = "watch_8_205_5_2026-04-25"
+    parts = payload.split("_", 1)[1].split("_")  # ["8","205","5","2026-04-25"]
+    if len(parts) < 2:
+        await update.message.reply_text("Invalid alert link. Use /watch to set an alert manually.")
+        return
+
+    room_no = parts[0]
+    try:
+        target_serial = int(parts[1])
+        look_ahead = int(parts[2]) if len(parts) >= 3 else 5
+        hearing_date = parts[3] if len(parts) >= 4 else _today_ist()
+    except (ValueError, IndexError):
+        await update.message.reply_text("Invalid alert link. Use /watch to set an alert manually.")
+        return
+
+    db.remove_subscription(telegram_id, room_no)
+    db.add_subscription(
+        telegram_id, room_no, target_serial, look_ahead,
+        hearing_date=hearing_date,
+    )
+    alert_at = target_serial - look_ahead
+    current, _ = _get_room_data(db, room_no)
+    vc_links = db.get_vc_zoom_links(_today_ist())
+
+    lines = [
+        "✅ *Alert linked to your Telegram account!*",
+        f"Room: *{room_no}* · Date: *{hearing_date}*",
+        f"Your serial: *{target_serial}* · Alert at: *{alert_at}*",
+    ]
+    if current is not None:
+        lines.append(f"Current serial: *{current}*")
+    if room_no in vc_links:
+        lines.append("📹 VC link available — will be sent with alert")
+    lines += ["", "Cancel: `/unwatch " + room_no + "`"]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -167,6 +219,51 @@ async def cmd_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "📹 = VC available  🏛 = in-person",
         "Use `/status <room>` for details or `/watch <room> <serial>` to set alert.",
     ]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_daily(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    db: DB = ctx.bot_data["db"]
+    telegram_id = str(update.effective_user.id)
+    today = _today_ist()
+
+    subs = db.list_user_subscriptions(telegram_id)
+    rooms = _all_rooms_summary(db)
+    vc_links = db.get_vc_zoom_links(today)
+
+    lines: list[str] = []
+
+    if subs:
+        lines.append("🔔 *Your alerts today:*\n")
+        shown = 0
+        for s in subs:
+            date_str = s.get("hearing_date") or "any day"
+            if date_str not in (today, "any day"):
+                continue
+            current, _ = _get_room_data(db, str(s["room_no"]))
+            alert_at = s["target_serial"] - s["look_ahead"]
+            cur_str = f" · now at {current}" if current is not None else ""
+            lines.append(
+                f"• *Room {s['room_no']}* — serial {s['target_serial']} · alert at {alert_at}{cur_str}"
+            )
+            shown += 1
+        if shown == 0:
+            lines.append("_(none for today)_")
+        lines.append("")
+
+    if not rooms:
+        lines.append("No court data right now.")
+    else:
+        lines.append("*Active courts:*\n")
+        for r in rooms:
+            vc = "📹" if r["room_no"] in vc_links else "🏛"
+            judge_short = r["judge"].replace("HON'BLE ", "").replace("JUSTICE ", "").strip()
+            if len(judge_short) > 40:
+                judge_short = judge_short[:38] + "…"
+            lines.append(f"{vc} *Room {r['room_no']}* — Serial: *{r['serial']}*")
+            if judge_short:
+                lines.append(f"   _{judge_short}_")
+
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
@@ -213,12 +310,14 @@ async def cmd_watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     if len(args) < 2:
         await update.message.reply_text(
-            "Usage: `/watch <room_no> <your_serial> [alert_before]`\n\n"
+            "Usage: `/watch <room_no> <your_serial> [alert_before] [date]`\n\n"
             "*room\\_no* — court room number (use /today to find it)\n"
             "*your\\_serial* — your case's serial number from the cause list\n"
-            "*alert\\_before* — how many serials before to alert (default: 5)\n\n"
-            "Example: `/watch 8 45` — alert when room 8 reaches serial 40\n"
-            "Example: `/watch 8 45 3` — alert when room 8 reaches serial 42",
+            "*alert\\_before* — how many serials before to alert (default: 5)\n"
+            "*date* — YYYY\\-MM\\-DD, default today\n\n"
+            "Example: `/watch 8 45` — alert today when room 8 reaches serial 40\n"
+            "Example: `/watch 8 45 3` — alert when room 8 reaches serial 42\n"
+            "Example: `/watch 8 11 5 2026\\-04\\-25` — for tomorrow's hearing",
             parse_mode="Markdown",
         )
         return
@@ -235,25 +334,42 @@ async def cmd_watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("alert\\_before must be between 0 and 50.", parse_mode="Markdown")
         return
 
+    # Optional 4th arg: hearing date (YYYY-MM-DD)
+    hearing_date = _today_ist()
+    if len(args) >= 4:
+        import re
+        date_arg = args[3]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_arg):
+            await update.message.reply_text(
+                "Date must be YYYY\\-MM\\-DD format, e.g. `2026-04-25`",
+                parse_mode="Markdown",
+            )
+            return
+        hearing_date = date_arg
+
     current, _ = _get_room_data(db, room_no)
     vc_links = db.get_vc_zoom_links(_today_ist())
 
     db.remove_subscription(telegram_id, room_no)
-    db.add_subscription(telegram_id, room_no, target_serial, look_ahead)
+    db.add_subscription(telegram_id, room_no, target_serial, look_ahead, hearing_date=hearing_date)
 
     alert_at = target_serial - look_ahead
+    is_today = hearing_date == _today_ist()
+    date_label = "today" if is_today else hearing_date
+
     lines = [
         f"✅ *Alert set for Room {room_no}*",
+        f"Hearing date: *{date_label}*",
         f"Your serial: *{target_serial}*",
         f"You'll be notified when serial reaches *{alert_at}* (i.e., {look_ahead} before yours)",
     ]
-    if current is not None:
+    if is_today and current is not None:
         lines.append(f"Current serial: *{current}*")
         if current >= alert_at:
             lines.append("⚠️ _Serial already past alert threshold — you'll get notified on next poll._")
-    if room_no in vc_links:
+    if is_today and room_no in vc_links:
         lines.append("📹 VC link available for today (sent with alert)")
-    else:
+    elif is_today:
         lines.append("🏛 In-person court (no VC link)")
     lines += ["", "Cancel anytime: `/unwatch " + room_no + "`"]
 
@@ -298,9 +414,10 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     for s in subs:
         current, _ = _get_room_data(db, str(s["room_no"]))
         current_str = f" (now at {current})" if current is not None else ""
+        date_str = s.get("hearing_date") or "any day"
         lines.append(
             f"• *Room {s['room_no']}* — your serial: {s['target_serial']}\n"
-            f"  Alert when serial ≥ {s['target_serial'] - s['look_ahead']}{current_str}"
+            f"  Date: _{date_str}_ · Alert when serial ≥ {s['target_serial'] - s['look_ahead']}{current_str}"
         )
     lines += ["", "Cancel: `/unwatch <room_no>`"]
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -326,6 +443,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CommandHandler("today", cmd_today))
+    app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("unwatch", cmd_unwatch))

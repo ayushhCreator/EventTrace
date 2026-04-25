@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from .config import Settings
 from .db import DB
@@ -15,10 +18,23 @@ from .db import DB
 _UI_DIR = Path(__file__).parent / "ui"
 
 
+class AlertRequest(BaseModel):
+    room_no: str
+    target_serial: int = Field(..., ge=1, le=9999)
+    look_ahead: int = Field(5, ge=0, le=50)
+    hearing_date: str | None = None       # YYYY-MM-DD IST; defaults to today
+    display_name: str | None = None
+    contact_type: str = "whatsapp"        # 'whatsapp' | 'telegram' (telegram via deep link)
+    phone: str | None = None              # E.164 e.g. "+919876543210" — required for whatsapp
+
+
 def _today_ist() -> str:
     """Current date in IST as YYYY-MM-DD."""
     from datetime import timedelta
     return (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+
+
+log = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -127,6 +143,64 @@ def create_app() -> FastAPI:
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=event_traces.csv"},
         )
+
+    # ── Alert signup ─────────────────────────────────────────────────────────
+
+    @app.post("/alert", status_code=201)
+    def create_alert(req: AlertRequest) -> dict:
+        date = req.hearing_date or _today_ist()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=422, detail="hearing_date must be YYYY-MM-DD")
+
+        phone = (req.phone or "").strip()
+        if req.contact_type == "whatsapp":
+            if not phone:
+                raise HTTPException(status_code=422, detail="phone is required for WhatsApp alerts")
+            # Normalise: ensure E.164 with leading +
+            if not phone.startswith("+"):
+                phone = "+" + phone
+
+        sub_id = db.add_subscription(
+            telegram_id="",
+            room_no=req.room_no,
+            target_serial=req.target_serial,
+            look_ahead=req.look_ahead,
+            hearing_date=date,
+            contact_type=req.contact_type,
+            display_name=req.display_name,
+            phone=phone or None,
+        )
+        alert_at = req.target_serial - req.look_ahead
+        bot_cmd = f"/watch {req.room_no} {req.target_serial} {req.look_ahead} {date}"
+        return {
+            "id": sub_id,
+            "room_no": req.room_no,
+            "target_serial": req.target_serial,
+            "alert_at": alert_at,
+            "hearing_date": date,
+            "contact_type": req.contact_type,
+            "telegram_command": bot_cmd,
+        }
+
+    # ── WhatsApp webhook (Twilio inbound) ────────────────────────────────────
+
+    @app.post("/webhook/whatsapp", response_class=HTMLResponse)
+    async def whatsapp_webhook(request: Request) -> HTMLResponse:
+        """Twilio calls this with form-encoded data for every inbound WhatsApp message."""
+        from .whatsapp_bot import handle_inbound
+        form = await request.form()
+        form_dict = dict(form)
+        try:
+            reply = handle_inbound(form_dict, db)
+        except Exception as exc:
+            log.error("WhatsApp webhook error: %s", exc)
+            reply = "Sorry, something went wrong. Try again."
+        # Twilio expects TwiML XML response
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f"<Response><Message>{reply}</Message></Response>"
+        )
+        return HTMLResponse(content=twiml, media_type="application/xml")
 
     # ── UI pages ─────────────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Display Board — The High Court at Calcutta, Principal Bench</title>
 <meta name="description" content="Live display board for The High Court at Calcutta, Principal Bench — real-time court serial updates.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 <style>
   :root {
     --ink: #0d1b2a;
@@ -331,6 +332,171 @@
   }
   .eye-btn:hover { border-color: var(--accent); color: var(--accent); background: #f0f4f9; }
 
+  /* Alert button */
+  .alert-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1.5px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 6px;
+    color: var(--ink-light);
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+    flex-shrink: 0;
+    font-size: 13px;
+  }
+  .alert-btn:hover { border-color: var(--gold); color: var(--gold); background: #fffbf0; }
+
+  /* Alert modal overlay */
+  #alert-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  #alert-modal-overlay.open { display: flex; }
+  #alert-modal {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+    padding: 24px 24px 20px;
+    width: 100%;
+    max-width: 420px;
+    margin: 16px;
+    position: relative;
+  }
+  #alert-modal h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .alert-modal-close {
+    position: absolute;
+    top: 12px; right: 14px;
+    font-size: 20px; color: #aaa; cursor: pointer; line-height: 1;
+    background: none; border: none;
+  }
+  .alert-modal-close:hover { color: var(--ink); }
+
+  /* Tabs */
+  .alert-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 16px;
+    gap: 0;
+  }
+  .alert-tab-btn {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border: none;
+    background: none;
+    color: var(--ink-light);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .alert-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .alert-tab-btn:hover:not(.active) { color: var(--ink); }
+  .alert-tab-panel { display: none; }
+  .alert-tab-panel.active { display: block; }
+
+  .alert-field {
+    margin-bottom: 13px;
+  }
+  .alert-field label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-light);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .alert-field input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 0.86rem;
+    color: var(--ink);
+    background: #fff;
+  }
+  .alert-field input:focus { outline: 2px solid rgba(26,58,107,0.2); border-color: var(--accent); }
+  .alert-field input[readonly] { background: #f4f7fa; color: var(--ink-light); cursor: default; }
+  .alert-submit-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    padding: 10px 0;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: background 0.15s;
+  }
+  .alert-submit-btn:hover { background: var(--accent-hover); }
+  .alert-submit-btn:disabled { opacity: 0.6; cursor: default; }
+  .alert-tg-deeplink-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: #229ED9;
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    padding: 11px 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s;
+    margin-top: 4px;
+  }
+  .alert-tg-deeplink-btn:hover { background: #1a8abf; }
+  .alert-tg-note {
+    font-size: 0.75rem;
+    color: var(--ink-light);
+    text-align: center;
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  .alert-wa-note {
+    font-size: 0.73rem;
+    color: var(--ink-light);
+    background: #fff9e6;
+    border: 1px solid #f0d060;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 13px;
+    line-height: 1.55;
+  }
+  .alert-wa-note strong { color: var(--ink); }
+  #alert-result {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    min-height: 1.2em;
+  }
+  #alert-result.ok  { color: var(--success); }
+  #alert-result.err { color: var(--danger); }
+
   /* VC / Zoom button */
   .vc-btn {
     display: inline-flex;
@@ -421,6 +587,27 @@
   }
   .popup-label { color: var(--ink-light); flex-shrink: 0; }
   .popup-val { font-weight: 600; color: var(--ink); text-align: right; word-break: break-all; }
+
+  /* ── Status banner ───────────────────────────────────────────────────── */
+  #status-banner { display: none; max-width: 1200px; margin: 10px auto 0; padding: 0 12px; }
+  .banner-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .banner-item:last-child { margin-bottom: 0; }
+  .banner-item .banner-icon { flex-shrink: 0; font-size: 1rem; line-height: 1.3; }
+  .banner-item .banner-body { flex: 1; }
+  .banner-item .banner-title { font-weight: 700; margin-bottom: 2px; }
+  .banner-item .banner-sub { color: inherit; opacity: 0.85; font-weight: 400; }
+  .banner-warn  { background: #fff9e6; border: 1px solid #f0c040; color: #7a5a00; }
+  .banner-error { background: #fdf0ef; border: 1px solid #e0a090; color: #7a2010; }
+  .banner-info  { background: #f0f6ff; border: 1px solid #b0ccf0; color: #1a3a6b; }
 
   /* ── Empty / loading states ──────────────────────────────────────────── */
   .empty-row td { text-align: center; color: var(--ink-light); padding: 32px; font-size: 0.9rem; }
@@ -599,6 +786,9 @@
   </div>
 </div>
 
+<!-- Status banner: staleness / no-session / cause list warnings -->
+<div id="status-banner"></div>
+
 <!-- Table -->
 <div class="table-wrap">
   <table class="board-table" id="board-table">
@@ -670,6 +860,76 @@
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M4 8h11a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/></svg>
     Join Zoom Call
   </a>
+</div>
+
+<!-- Alert modal -->
+<div id="alert-modal-overlay">
+  <div id="alert-modal">
+    <button class="alert-modal-close" id="alert-modal-close" title="Close">&times;</button>
+    <h3>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      Set Alert — Room <span id="alert-room-label"></span>
+    </h3>
+
+    <!-- Shared fields -->
+    <div class="alert-field">
+      <label>Room</label>
+      <input id="alert-room" type="text" readonly>
+    </div>
+    <div class="alert-field">
+      <label>Your serial number</label>
+      <input id="alert-serial" type="number" min="1" max="9999" placeholder="e.g. 205">
+    </div>
+    <div class="alert-field">
+      <label>Hearing date</label>
+      <input id="alert-date" type="date">
+    </div>
+    <div class="alert-field">
+      <label>Alert N serials before (default 5)</label>
+      <input id="alert-ahead" type="number" min="0" max="50" value="5">
+    </div>
+
+    <!-- Tabs -->
+    <div class="alert-tabs">
+      <button class="alert-tab-btn active" id="tab-tg-btn" onclick="switchAlertTab('telegram')">
+        📱 Telegram
+      </button>
+      <button class="alert-tab-btn" id="tab-wa-btn" onclick="switchAlertTab('whatsapp')">
+        💬 WhatsApp
+      </button>
+    </div>
+
+    <!-- Telegram tab -->
+    <div class="alert-tab-panel active" id="tab-telegram">
+      <a class="alert-tg-deeplink-btn" id="alert-tg-link" href="#" target="_blank" rel="noopener">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.01 9.478c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.873.743z"/></svg>
+        Open in Telegram Bot
+      </a>
+      <p class="alert-tg-note">
+        Opens @Eventtrace_bot in Telegram. Tap <strong>START</strong> — alert is linked to your account instantly.
+      </p>
+    </div>
+
+    <!-- WhatsApp tab -->
+    <div class="alert-tab-panel" id="tab-whatsapp">
+      <div class="alert-wa-note">
+        <strong>First time?</strong> Save our number and send<br>
+        <code id="wa-join-keyword" style="font-size:0.8rem;background:#f5f5f5;padding:2px 5px;border-radius:3px;">join friend-may</code>
+        to <a href="https://wa.me/14155238886?text=join%20friend-may" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">+1 415 523 8886</a> on WhatsApp to opt in.<br>
+        You only need to do this once.
+      </div>
+      <div class="alert-field">
+        <label>Your WhatsApp number (with country code)</label>
+        <input id="alert-phone" type="tel" placeholder="+919876543210">
+      </div>
+      <div class="alert-field">
+        <label>Your name (optional)</label>
+        <input id="alert-name" type="text" placeholder="Adv. Sharma">
+      </div>
+      <button class="alert-submit-btn" id="alert-submit-btn">Save WhatsApp Alert</button>
+      <div id="alert-result"></div>
+    </div>
+  </div>
 </div>
 
 <footer>
@@ -848,6 +1108,11 @@ function renderRow(row, idx, isToday) {
        </button>`
     : '';
 
+  // Alert button — opens serial alert setup modal
+  const alertBtn = `<button class="alert-btn" onclick="showAlertModal(event,${idx})" title="Set serial alert for this court">
+       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+     </button>`;
+
   const vcBtn = zoom
     ? `<button class="vc-btn" onclick="showVC(event,${idx})" title="View VC link for this court">
          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M4 8h11a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/></svg>
@@ -891,6 +1156,7 @@ function renderRow(row, idx, isToday) {
             <span class="serial-num">${esc(sr)}</span>
             ${eyeBtn}
             ${vcBtn}
+            ${alertBtn}
           </div>
           ${passOver}
           ${msg}
@@ -955,14 +1221,12 @@ function getFilteredRows() {
     if (!grouped.has(key)) {
       grouped.set(key, {
         base: { ...r },
-        serials: expandSerials(r.cause_list_sr_no),
         courtIds: [r._court_id],
       });
       continue;
     }
 
     const g = grouped.get(key);
-    g.serials.push(...expandSerials(r.cause_list_sr_no));
     g.courtIds.push(r._court_id);
 
     const prevMs = parseMs(g.base.hearing_last_modified) || 0;
@@ -974,8 +1238,6 @@ function getFilteredRows() {
 
   return [...grouped.values()].map(g => {
     const merged = { ...g.base };
-    const packed = compressSerials(g.serials);
-    if (packed) merged.cause_list_sr_no = packed;
     merged._group_court_ids = [...new Set(g.courtIds)].filter(Boolean);
     if (!merged._court_id && merged._group_court_ids.length) {
       merged._court_id = merged._group_court_ids[0];
@@ -1092,6 +1354,7 @@ function renderTable(today) {
     document.getElementById('health-dot').className = 'dot stale';
     document.getElementById('last-updated').textContent = 'No data';
     updateCauseListLink(activeDate);
+    updateStatusBanner();
     return;
   }
 
@@ -1148,6 +1411,7 @@ function renderTable(today) {
   document.getElementById('footer-time').textContent =
     'Refreshed ' + new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
   updateCauseListLink(activeDate);
+  updateStatusBanner();
 }
 
 // ── Popups ────────────────────────────────────────────────────────────────────
@@ -1298,6 +1562,239 @@ let intervalId = setInterval(fetchAndRender, 15000);
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 fetchAndRender();
+
+// ── Alert modal ───────────────────────────────────────────────────────────────
+
+const TG_BOT_USERNAME = 'Eventtrace_bot';
+
+function _buildDeepLink() {
+  const room   = document.getElementById('alert-room').value;
+  const serial = document.getElementById('alert-serial').value;
+  const ahead  = document.getElementById('alert-ahead').value || '5';
+  const date   = document.getElementById('alert-date').value;
+  if (!room || !serial || !date) return null;
+  const payload = `watch_${room}_${serial}_${ahead}_${date}`;
+  return `https://t.me/${TG_BOT_USERNAME}?start=${payload}`;
+}
+
+function _refreshTgLink() {
+  const link = document.getElementById('alert-tg-link');
+  const url = _buildDeepLink();
+  if (url) {
+    link.href = url;
+    link.style.opacity = '1';
+    link.style.pointerEvents = '';
+  } else {
+    link.href = '#';
+    link.style.opacity = '0.45';
+    link.style.pointerEvents = 'none';
+  }
+}
+
+function switchAlertTab(tab) {
+  document.getElementById('tab-telegram').classList.toggle('active', tab === 'telegram');
+  document.getElementById('tab-whatsapp').classList.toggle('active', tab === 'whatsapp');
+  document.getElementById('tab-tg-btn').classList.toggle('active', tab === 'telegram');
+  document.getElementById('tab-wa-btn').classList.toggle('active', tab === 'whatsapp');
+  document.getElementById('alert-result').textContent = '';
+  document.getElementById('alert-result').className = '';
+}
+
+function showAlertModal(event, idx) {
+  event.stopPropagation();
+  const row = rowStore[idx];
+  if (!row) return;
+
+  const room = String(row.room_no || '');
+  document.getElementById('alert-room-label').textContent = room;
+  document.getElementById('alert-room').value = room;
+  document.getElementById('alert-date').value = todayIST();
+  document.getElementById('alert-serial').value = '';
+  document.getElementById('alert-ahead').value = '5';
+  document.getElementById('alert-phone').value = '';
+  document.getElementById('alert-name').value = '';
+  document.getElementById('alert-result').textContent = '';
+  document.getElementById('alert-result').className = '';
+  document.getElementById('alert-submit-btn').disabled = false;
+
+  // Reset to Telegram tab
+  switchAlertTab('telegram');
+  _refreshTgLink();
+
+  document.getElementById('alert-modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('alert-serial').focus(), 80);
+}
+
+// Refresh deep link whenever shared fields change
+['alert-serial', 'alert-ahead', 'alert-date'].forEach(id => {
+  document.getElementById(id).addEventListener('input', _refreshTgLink);
+});
+
+document.getElementById('alert-modal-close').addEventListener('click', () => {
+  document.getElementById('alert-modal-overlay').classList.remove('open');
+});
+document.getElementById('alert-modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('alert-modal-overlay')) {
+    document.getElementById('alert-modal-overlay').classList.remove('open');
+  }
+});
+
+// ── Status banner ────────────────────────────────────────────────────────────
+
+function _istHour() {
+  return parseInt(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }), 10);
+}
+
+function updateStatusBanner() {
+  const banner = document.getElementById('status-banner');
+  const msgs = [];
+  const today = todayIST();
+  const viewingToday = !selectedDate || selectedDate === today;
+
+  // ── 1. Scrape staleness ────────────────────────────────────────────────
+  // Use max _last_seen across ALL rows (regardless of date) — this reflects
+  // the last time the monitor successfully polled the court board.
+  let maxLastSeenMs = 0;
+  for (const r of allRows) {
+    const ms = r._last_seen ? new Date(r._last_seen).getTime() : 0;
+    if (ms > maxLastSeenMs) maxLastSeenMs = ms;
+  }
+  const ageSeconds = maxLastSeenMs > 0 ? Math.floor((Date.now() - maxLastSeenMs) / 1000) : Infinity;
+
+  // ── 2. Today's rows ───────────────────────────────────────────────────
+  const todayRows = allRows.filter(r => r.hearing_date === today);
+
+  if (viewingToday) {
+    if (todayRows.length === 0 && ageSeconds < 30 * 60) {
+      // Monitor is running but no data for today → court not in session
+      msgs.push({
+        type: 'warn',
+        icon: '🏛',
+        title: 'Court does not appear to be in session today.',
+        sub: 'The display board shows no active courts. This may be a holiday, vacation, or the board hasn\'t started yet.',
+      });
+    } else if (todayRows.length === 0 && ageSeconds >= 30 * 60 && maxLastSeenMs > 0) {
+      // No data AND monitor hasn't polled recently
+      msgs.push({
+        type: 'error',
+        icon: '🔴',
+        title: 'No court data — monitor may not be running.',
+        sub: `Board data last received ${timeAgo(new Date(maxLastSeenMs).toISOString())}. Court may not be in session, or the monitor process is down.`,
+      });
+    } else if (todayRows.length === 0 && maxLastSeenMs === 0) {
+      msgs.push({
+        type: 'info',
+        icon: 'ℹ️',
+        title: 'No data yet for today.',
+        sub: 'The monitor has not picked up any board activity today. Court may not be in session.',
+      });
+    } else if (ageSeconds > 4 * 3600) {
+      // Data exists but very old → court has adjourned
+      msgs.push({
+        type: 'error',
+        icon: '🔴',
+        title: 'Court has likely adjourned for the day.',
+        sub: `Board data last updated ${timeAgo(new Date(maxLastSeenMs).toISOString())}. The data shown below is from earlier today.`,
+      });
+    } else if (ageSeconds > 30 * 60) {
+      // Data exists but somewhat stale → connection issue or early adjournment
+      msgs.push({
+        type: 'warn',
+        icon: '⚠️',
+        title: `Data last updated ${timeAgo(new Date(maxLastSeenMs).toISOString())}.`,
+        sub: 'Court may have adjourned, or there is a connection issue. Refresh to check.',
+      });
+    }
+
+    // ── 3. Cause list not published ───────────────────────────────────────
+    if (Object.keys(vcMap).length === 0 && _istHour() >= 9) {
+      msgs.push({
+        type: 'info',
+        icon: '📄',
+        title: 'Today\'s cause list not yet published.',
+        sub: 'VC links are unavailable until the official cause list PDF is uploaded to the CHC website. Usually available by 9–10 AM on court days.',
+      });
+    }
+  }
+
+  if (msgs.length === 0) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+
+  banner.style.display = 'block';
+  banner.innerHTML = msgs.map(m => `
+    <div class="banner-item banner-${m.type}">
+      <span class="banner-icon">${m.icon}</span>
+      <div class="banner-body">
+        <div class="banner-title">${esc(m.title)}</div>
+        <div class="banner-sub">${esc(m.sub)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// WhatsApp submit
+document.getElementById('alert-submit-btn').addEventListener('click', async () => {
+  const room   = document.getElementById('alert-room').value.trim();
+  const serial = parseInt(document.getElementById('alert-serial').value, 10);
+  const ahead  = parseInt(document.getElementById('alert-ahead').value, 10) || 5;
+  const date   = document.getElementById('alert-date').value;
+  const phone  = document.getElementById('alert-phone').value.trim();
+  const name   = document.getElementById('alert-name').value.trim() || null;
+  const result = document.getElementById('alert-result');
+
+  if (!room || !serial || !date) {
+    result.textContent = 'Fill in serial and date first.';
+    result.className = 'err';
+    return;
+  }
+  if (!phone) {
+    result.textContent = 'Enter your WhatsApp number.';
+    result.className = 'err';
+    return;
+  }
+
+  document.getElementById('alert-submit-btn').disabled = true;
+  result.textContent = '';
+  result.className = '';
+
+  try {
+    const resp = await fetch(API + '/alert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        room_no: room,
+        target_serial: serial,
+        look_ahead: ahead,
+        hearing_date: date,
+        contact_type: 'whatsapp',
+        phone,
+        display_name: name,
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      result.textContent = `✓ Saved — alert fires when Room ${room} hits serial ${data.alert_at}. Make sure you've joined the WhatsApp sandbox first.`;
+      result.className = 'ok';
+    } else {
+      const detail = data.detail;
+      const msg = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+          : 'Error saving alert.';
+      result.textContent = msg;
+      result.className = 'err';
+      document.getElementById('alert-submit-btn').disabled = false;
+    }
+  } catch {
+    result.textContent = 'Network error — please try again.';
+    result.className = 'err';
+    document.getElementById('alert-submit-btn').disabled = false;
+  }
+});
 </script>
 </body>
 </html>
