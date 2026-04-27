@@ -851,7 +851,8 @@ function populateCsDateFilter() {
   dates.forEach(d => {
     const opt = document.createElement("option");
     opt.value = d;
-    opt.textContent = d + (d === today ? " (today)" : "");
+    const [y,m,dd] = d.split('-');
+    opt.textContent = `${dd}/${m}/${y}` + (d === today ? " (today)" : "");
     sel.appendChild(opt);
   });
   if (prev && dates.includes(prev)) sel.value = prev;

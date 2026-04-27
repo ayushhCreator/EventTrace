@@ -161,16 +161,18 @@ def handle_inbound(form: dict[str, Any], db: DB) -> str:
 def _help_text() -> str:
     return (
         "🏛 *Eventtrace — Calcutta High Court Alerts*\n\n"
+        "Each court room has its own serial sequence (1, 2, 3…).\n"
+        "You need *room number + your serial* from the cause list.\n\n"
         "Commands:\n"
         "TODAY — active courts on live board (today only)\n"
         "CAUSELIST — today's courts with VC links\n"
         "ZOOM 8 — Zoom link for room 8\n"
         "DAILY — your alerts + all active courts\n"
         "STATUS 8 — current serial for room 8\n"
-        "WATCH 8 205 — alert when room 8 reaches serial 200\n"
-        "WATCH 8 205 3 — alert 3 before (serial 202)\n"
-        "WATCH 8 11 5 2026-04-25 — for tomorrow's hearing\n"
-        "UNWATCH 8 — cancel alert\n"
+        "WATCH 8 205 — alert for Room 8, your serial is 205\n"
+        "WATCH 8 205 3 — alert 3 serials before 205 (at 202)\n"
+        "WATCH 8 205 5 2026-04-28 — for a future date\n"
+        "UNWATCH 8 — cancel alert for Room 8 (use room number, not serial)\n"
         "LIST — your active alerts\n"
         "HELP — this guide"
     )
@@ -197,10 +199,29 @@ def _cmd_today(db: DB) -> str:
     rooms = _all_rooms_summary(db)
     warning = _monitor_stale_warning(db)
     vc_links = db.get_vc_zoom_links(today)
+    vc_count = len(vc_links)
+    now_ist = datetime.now(_IST)
+    board_active = db.get_monitor_state("board_active")
 
+    # Board known to be empty right now
+    if board_active == "0":
+        if now_ist.hour < 10 or (now_ist.hour == 10 and now_ist.minute < 30):
+            msg = (
+                f"🏛 Board not live yet for {today}.\n"
+                "Court display usually starts at 10:30 AM IST.\n\n"
+            )
+        else:
+            msg = f"🏛 Board closed for {today}. Court session has ended.\n\n"
+        if vc_count:
+            msg += f"📋 Cause list has *{vc_count} courts* with VC links.\nSend CAUSELIST to see them."
+        else:
+            msg += "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+        if warning:
+            msg += warning
+        return msg
+
+    # Board state unknown (monitor never ran) or active but no today rows yet
     if not rooms:
-        vc_count = len(vc_links)
-        now_ist = datetime.now(_IST)
         if now_ist.hour < 10 or (now_ist.hour == 10 and now_ist.minute < 30):
             msg = (
                 f"🏛 Board not live yet for {today}.\n"
@@ -316,6 +337,7 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
 
     if ahead < 0 or ahead > 50:
         return "ahead must be 0–50."
+    ahead = min(ahead, target - 1)  # threshold must be >= 1
 
     hearing_date = _today_ist()
     if len(parts) >= 5:
@@ -363,7 +385,13 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
 
 
 def _cmd_unwatch(db: DB, phone: str, room_no: str) -> str:
-    db.remove_whatsapp_subscription(phone, room_no)
+    removed = db.remove_whatsapp_subscription(phone, room_no)
+    if not removed:
+        subs = _list_wa_subscriptions(db, phone)
+        if subs:
+            active_rooms = ", ".join(f"Room {s['room_no']}" for s in subs)
+            return f"No active alert for Room {room_no}.\n\nYour active alerts: {active_rooms}"
+        return f"No active alert for Room {room_no}.\n\nSend LIST to see your alerts."
     return f"✓ Stopped watching Room {room_no}."
 
 

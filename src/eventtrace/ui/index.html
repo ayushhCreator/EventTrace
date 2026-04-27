@@ -826,16 +826,18 @@
       <input id="alert-room" type="text" readonly>
     </div>
     <div class="alert-field">
-      <label>Your serial number</label>
+      <label>Your serial number <span style="font-weight:400;color:var(--ink-light);font-size:0.8rem;">— from the cause list for this room</span></label>
       <input id="alert-serial" type="number" min="1" max="9999" placeholder="e.g. 205">
+      <small style="color:var(--ink-light);font-size:0.75rem;margin-top:3px;display:block;">Each room has its own serial sequence. Serial 5 in Room 1 is different from serial 5 in Room 8.</small>
     </div>
     <div class="alert-field">
       <label>Hearing date</label>
       <input id="alert-date" type="date">
     </div>
     <div class="alert-field">
-      <label>Alert N serials before (default 5)</label>
+      <label>Alert N serials before yours (default 5)</label>
       <input id="alert-ahead" type="number" min="0" max="50" value="5">
+      <small style="color:var(--ink-light);font-size:0.75rem;margin-top:3px;display:block;">e.g. serial 205, ahead 5 → alert fires at serial 200. Alert fires once only.</small>
     </div>
 
     <!-- WhatsApp alert -->
@@ -1110,29 +1112,46 @@ function applyFilter() {
 
 // ── Date selector ─────────────────────────────────────────────────────────────
 
-function populateDateSelect(rows) {
-  const dates = [...new Set(rows.map(r => r.hearing_date).filter(Boolean))].sort().reverse();
+function fmtDate(iso) {
+  // YYYY-MM-DD → DD/MM/YYYY
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+async function populateDateSelect(rows) {
+  const boardDates = [...new Set(rows.map(r => r.hearing_date).filter(Boolean))];
+  let vcDates = [];
+  try {
+    const r = await fetch(API + '/vc-links/dates');
+    if (r.ok) vcDates = await r.json();
+  } catch (_) {}
+
+  const allDates = [...new Set([...boardDates, ...vcDates])].sort().reverse();
   const today = todayIST();
   const sel = document.getElementById('date-select');
   const prev = sel.value;
 
   sel.innerHTML = '';
 
-  // "Today" option = filter to today's date
+  // Today option (value="" = always maps to today in getFilteredRows)
   const latestOpt = document.createElement('option');
   latestOpt.value = '';
-  latestOpt.textContent = 'Today (' + today + ')';
+  latestOpt.textContent = 'Today — ' + fmtDate(today);
   sel.appendChild(latestOpt);
 
-  dates.forEach(d => {
+  // All other dates (skip today — already shown above)
+  allDates.filter(d => d !== today).forEach(d => {
     const opt = document.createElement('option');
     opt.value = d;
-    opt.textContent = d + (d === today ? ' (today)' : '');
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const label = d === tomorrowStr ? ' — tomorrow (cause list ready)' : '';
+    opt.textContent = fmtDate(d) + label;
     sel.appendChild(opt);
   });
 
-  // Restore previous selection if still valid
-  if (prev && dates.includes(prev)) sel.value = prev;
+  if (prev && allDates.includes(prev)) sel.value = prev;
 }
 
 function getFilteredRows() {
@@ -1229,7 +1248,7 @@ async function fetchAndRender() {
       return rn !== 0 ? rn : (a.side_short_form || '').localeCompare(b.side_short_form || '');
     });
 
-    populateDateSelect(allRows);
+    await populateDateSelect(allRows);
     renderTable(today);
 
   } catch (err) {
@@ -1658,7 +1677,7 @@ document.getElementById('alert-submit-btn').addEventListener('click', async () =
     });
     const data = await resp.json();
     if (resp.ok) {
-      result.textContent = `✓ Saved — alert fires when Room ${room} hits serial ${data.alert_at}. Make sure you've joined the WhatsApp sandbox first.`;
+      result.textContent = `✓ Saved — alert fires once when Room ${room} hits serial ${data.alert_at}. To cancel, send UNWATCH ${room} on WhatsApp.`;
       result.className = 'ok';
     } else {
       const detail = data.detail;

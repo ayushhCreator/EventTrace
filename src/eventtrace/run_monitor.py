@@ -128,9 +128,9 @@ def _vc_scheduler_thread(settings: Settings, db: DB) -> None:
                     _run_vc_scrape(today, w, settings, db)
                     break  # one scrape per wake-up is enough
 
-            # At 20:00+ IST scrape tomorrow's links
-            if hour >= 20 and _should_scrape_vc(tomorrow, 20):
-                _run_vc_scrape(tomorrow, 20, settings, db)
+            # At 14:00+ IST scrape tomorrow's links (cause list usually published by afternoon)
+            if hour >= 14 and _should_scrape_vc(tomorrow, 14):
+                _run_vc_scrape(tomorrow, 14, settings, db)
 
         except Exception as exc:
             log.warning("VC scheduler error: %s", exc)
@@ -327,14 +327,15 @@ def _dispatch_notifications(
         alert_threshold = target - look_ahead
         last_notified = sub.get("last_notified_serial")
 
+        # Fire only once — skip if already alerted
+        if sub.get("alerted_at"):
+            continue
+
         current_serial = _current_serial_for_room(snapshot, room_no)
         if current_serial is None:
             continue
 
-        should_fire = current_serial >= alert_threshold and (
-            last_notified is None or current_serial > last_notified
-        )
-        if not should_fire:
+        if current_serial < alert_threshold:
             continue
 
         zoom_url = vc_links.get(room_no, "")
@@ -424,6 +425,7 @@ def main() -> None:
             global _failure_outage_notified
             _failure_outage_notified = False
             db.set_monitor_state("last_successful_poll", observed.isoformat())
+            db.set_monitor_state("board_active", "1" if rows else "0")
 
             _dispatch_notifications(snapshot, db, settings)           # alert fire
             _notify_adjournments(changes, snapshot, db, settings)     # Fix 2: adjournment

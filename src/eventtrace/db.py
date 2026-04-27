@@ -400,12 +400,13 @@ class DB:
                 (telegram_id, room_no),
             )
 
-    def remove_whatsapp_subscription(self, phone: str, room_no: str) -> None:
+    def remove_whatsapp_subscription(self, phone: str, room_no: str) -> int:
         with self.connect() as con:
-            con.execute(
-                "UPDATE subscriptions SET active=0 WHERE phone=? AND room_no=? AND contact_type='whatsapp'",
+            cur = con.execute(
+                "UPDATE subscriptions SET active=0 WHERE phone=? AND room_no=? AND contact_type='whatsapp' AND active=1",
                 (phone, room_no),
             )
+            return cur.rowcount
 
     def list_active_subscriptions(self, today: str | None = None) -> list[dict[str, Any]]:
         """Returns active subscriptions, optionally filtered to hearing_date = today.
