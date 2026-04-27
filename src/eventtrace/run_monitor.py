@@ -138,21 +138,182 @@ def _vc_scheduler_thread(settings: Settings, db: DB) -> None:
         time.sleep(1800)  # check every 30 minutes
 
 
-# ── Telegram notification dispatch ──────────────────────────────────────────
+# ── Notification helpers ──────────────────────────────────────────────────────
+
+def _wa_creds_ok(settings: Settings) -> bool:
+    return bool(settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_whatsapp_from)
+
+
+def _send_wa(settings: Settings, phone: str, body: str) -> None:
+    from .whatsapp_bot import send_whatsapp_sync
+    send_whatsapp_sync(
+        account_sid=settings.twilio_account_sid,
+        auth_token=settings.twilio_auth_token,
+        from_number=settings.twilio_whatsapp_from,
+        to_phone=phone,
+        body=body,
+    )
+
+
+def _send_tg(settings: Settings, telegram_id: str, body: str) -> None:
+    import httpx
+    httpx.post(
+        f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
+        json={"chat_id": telegram_id, "text": body, "parse_mode": "Markdown"},
+        timeout=10,
+    ).raise_for_status()
+
+
+def _deliver(sub: dict, body: str, settings: Settings) -> None:
+    contact_type = sub.get("contact_type", "telegram")
+    if contact_type == "whatsapp":
+        phone = sub.get("phone", "")
+        if not phone or not _wa_creds_ok(settings):
+            return
+        _send_wa(settings, phone, body)
+    elif contact_type == "telegram":
+        tid = sub.get("telegram_id", "")
+        if not tid or not settings.telegram_token:
+            return
+        _send_tg(settings, tid, body)
+
+
+def _current_serial_for_room(snapshot: dict[str, dict[str, Any]], room_no: str) -> int | None:
+    best: int | None = None
+    for row in snapshot.values():
+        if str(row.get("room_no", "")) != room_no:
+            continue
+        try:
+            val = int(str(row.get("cause_list_sr_no", "")).split("-")[-1])
+            if best is None or val > best:
+                best = val
+        except (TypeError, ValueError):
+            pass
+    return best
+
+
+# ── Fix 1: Monitor scrape-failure notifications ───────────────────────────────
+_FAILURE_NOTIFY_THRESHOLD = 5   # consecutive failures before warning
+_failure_outage_notified = False  # only notify once per outage
+
+
+def _notify_monitor_down(db: DB, settings: Settings) -> None:
+    today_str = _today_ist().isoformat()
+    subs = db.list_active_subscriptions(today=today_str)
+    for sub in subs:
+        try:
+            body = (
+                "⚠️ *EventTrace monitor is having trouble*\n"
+                f"Scraping has been failing for the last ~{_FAILURE_NOTIFY_THRESHOLD * settings.poll_seconds}s.\n"
+                "Board data may be stale — check the cause list directly.\n"
+                "Your alert is still active and will fire once monitoring resumes."
+            )
+            _deliver(sub, body, settings)
+        except Exception as exc:
+            log.warning("monitor-down notify failed for sub %s: %s", sub["id"], exc)
+
+
+# ── Fix 2: Court adjournment notifications ────────────────────────────────────
+
+def _notify_adjournments(
+    changes: list, snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
+) -> None:
+    """Detect courts that just left the board; notify subscribers whose serial wasn't reached."""
+    today_str = _today_ist().isoformat()
+
+    # Build court_id → room_no map from current_state
+    court_to_room: dict[str, str] = {}
+    for state in db.list_current_state():
+        room = str((state.get("data") or {}).get("room_no", "")).strip()
+        if room:
+            court_to_room[state["court_id"]] = room
+
+    for change in changes:
+        if change.field_name != "__present__" or change.new_value != "0":
+            continue
+        room_no = court_to_room.get(change.court_id, "")
+        if not room_no:
+            continue
+
+        last_serial = _current_serial_for_room(snapshot, room_no)
+        subs = db.list_active_subscriptions_for_room(room_no, today_str)
+
+        for sub in subs:
+            target = int(sub["target_serial"])
+            alerted = sub.get("alerted_at")
+            # Only notify if alert never fired (serial never reached threshold)
+            if alerted:
+                continue
+            try:
+                serial_str = f"Board stopped at serial *{last_serial}*." if last_serial else ""
+                body = (
+                    f"🏛 *Court Room {room_no} has adjourned*\n"
+                    f"Your case serial *{target}* was not reached today.\n"
+                    f"{serial_str}\n\n"
+                    "Check the official cause list for rescheduling."
+                )
+                _deliver(sub, body, settings)
+                db.deactivate_subscription(sub["id"])
+                log.info("Adjournment notified: sub %s room %s target %d", sub["id"], room_no, target)
+            except Exception as exc:
+                log.warning("Adjournment notify failed sub %s: %s", sub["id"], exc)
+
+
+# ── Fix 3: Missed-alert reminder ─────────────────────────────────────────────
+_REMINDER_DELAY_SECONDS = 15 * 60  # 15 minutes after alert fired
+
+
+def _send_reminders(
+    snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
+) -> None:
+    """If alert fired >15 min ago and serial has passed target, send reminder."""
+    today_str = _today_ist().isoformat()
+    subs = db.list_active_subscriptions(today=today_str)
+    now = utc_now()
+
+    for sub in subs:
+        alerted_at_str = sub.get("alerted_at")
+        if not alerted_at_str:
+            continue
+        if sub.get("reminder_sent"):
+            continue
+
+        try:
+            alerted_at = datetime.fromisoformat(alerted_at_str.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+
+        elapsed = (now - alerted_at).total_seconds()
+        if elapsed < _REMINDER_DELAY_SECONDS:
+            continue
+
+        room_no = str(sub["room_no"])
+        target = int(sub["target_serial"])
+        current_serial = _current_serial_for_room(snapshot, room_no)
+
+        if current_serial is None or current_serial < target:
+            continue  # case not yet called
+
+        try:
+            body = (
+                f"⚠️ *Reminder — Court Room {room_no}*\n"
+                f"Serial is now at *{current_serial}* — your case was *{target}*.\n"
+                "Your case may have already been called.\n"
+                "Please check with the court immediately."
+            )
+            _deliver(sub, body, settings)
+            db.mark_reminder_sent(sub["id"])
+            log.info("Reminder sent: sub %s room %s serial %d", sub["id"], room_no, current_serial)
+        except Exception as exc:
+            log.warning("Reminder failed sub %s: %s", sub["id"], exc)
+
+
+# ── Alert dispatch ────────────────────────────────────────────────────────────
 
 def _dispatch_notifications(
     snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
 ) -> None:
-    """Check active subscriptions and send Telegram alerts when serial is close."""
-    if not settings.telegram_token:
-        return
-    try:
-        from .telegram_bot import send_notification_sync
-    except ImportError:
-        return
-
     today_str = _today_ist().isoformat()
-    # Only subscriptions for today (or legacy NULL-date rows)
     subs = db.list_active_subscriptions(today=today_str)
     if not subs:
         return
@@ -164,27 +325,12 @@ def _dispatch_notifications(
         target = int(sub["target_serial"])
         look_ahead = int(sub["look_ahead"])
         alert_threshold = target - look_ahead
-        last_notified = sub.get("last_notified_serial")  # int or None
+        last_notified = sub.get("last_notified_serial")
 
-        contact_type = sub.get("contact_type", "telegram")
-
-        # Find current max serial for this room
-        current_serial: int | None = None
-        for row in snapshot.values():
-            if str(row.get("room_no", "")) == room_no:
-                try:
-                    sr = row.get("cause_list_sr_no", "")
-                    parts = str(sr).split("-")
-                    val = int(parts[-1])
-                    if current_serial is None or val > current_serial:
-                        current_serial = val
-                except (TypeError, ValueError):
-                    pass
-
+        current_serial = _current_serial_for_room(snapshot, room_no)
         if current_serial is None:
             continue
 
-        # Fire if at/past threshold AND not already notified at this serial or higher
         should_fire = current_serial >= alert_threshold and (
             last_notified is None or current_serial > last_notified
         )
@@ -199,33 +345,27 @@ def _dispatch_notifications(
             "zoom_url": zoom_url,
         }
         try:
+            contact_type = sub.get("contact_type", "telegram")
             if contact_type == "telegram":
-                if not sub.get("telegram_id"):
+                if not sub.get("telegram_id") or not settings.telegram_token:
                     continue
+                from .telegram_bot import send_notification_sync
                 send_notification_sync(
                     token=settings.telegram_token,
                     telegram_id=sub["telegram_id"],
                     payload=payload,
                 )
             elif contact_type == "whatsapp":
-                phone = sub.get("phone", "")
-                if not phone:
-                    continue
-                if not (settings.twilio_account_sid and settings.twilio_auth_token):
+                if not sub.get("phone") or not _wa_creds_ok(settings):
                     log.warning("Twilio creds not set — skipping WhatsApp sub %s", sub["id"])
                     continue
-                from .whatsapp_bot import send_whatsapp_sync, _build_alert_message
-                send_whatsapp_sync(
-                    account_sid=settings.twilio_account_sid,
-                    auth_token=settings.twilio_auth_token,
-                    from_number=settings.twilio_whatsapp_from,
-                    to_phone=phone,
-                    body=_build_alert_message(payload),
-                )
+                from .whatsapp_bot import _build_alert_message
+                _send_wa(settings, sub["phone"], _build_alert_message(payload))
             else:
-                continue  # web / unknown — no delivery yet
+                continue
 
             db.update_last_notified_serial(sub["id"], current_serial)
+            db.mark_alerted(sub["id"])   # Fix 3: track when alert fired
             db.log_notification(sub["id"], json.dumps(payload))
             log.info(
                 "Notified [%s] %s: room %s serial %d (target %d)",
@@ -259,6 +399,8 @@ def main() -> None:
     vc_thread.start()
     log.info("VC scrape scheduler started")
 
+    consecutive_failures = 0
+
     while True:
         observed = utc_now()
         try:
@@ -277,11 +419,33 @@ def main() -> None:
                     c.court_id, c.field_name, c.old_value, c.new_value, c.duration_seconds,
                 )
 
-            _dispatch_notifications(snapshot, db, settings)
+            # Fix 1: reset failure counter on success
+            consecutive_failures = 0
+            global _failure_outage_notified
+            _failure_outage_notified = False
+            db.set_monitor_state("last_successful_poll", observed.isoformat())
+
+            _dispatch_notifications(snapshot, db, settings)           # alert fire
+            _notify_adjournments(changes, snapshot, db, settings)     # Fix 2: adjournment
+            _send_reminders(snapshot, db, settings)                   # Fix 3: reminder
 
         except KeyboardInterrupt:
             raise
         except Exception as e:
             log.warning("scrape/apply failed: %s", e)
+            consecutive_failures += 1
+
+            # Fix 1: notify subscribers after sustained failure during court hours
+            ist_hour = _now_ist().hour
+            if (
+                consecutive_failures >= _FAILURE_NOTIFY_THRESHOLD
+                and 8 <= ist_hour <= 17
+                and not _failure_outage_notified
+            ):
+                try:
+                    _notify_monitor_down(db, settings)
+                    _failure_outage_notified = True
+                except Exception as notify_exc:
+                    log.warning("monitor-down notification failed: %s", notify_exc)
 
         time.sleep(settings.poll_seconds)

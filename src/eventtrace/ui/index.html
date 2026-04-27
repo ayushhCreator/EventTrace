@@ -387,31 +387,6 @@
   }
   .alert-modal-close:hover { color: var(--ink); }
 
-  /* Tabs */
-  .alert-tabs {
-    display: flex;
-    border-bottom: 2px solid var(--border);
-    margin-bottom: 16px;
-    gap: 0;
-  }
-  .alert-tab-btn {
-    flex: 1;
-    padding: 8px 0;
-    font-size: 0.82rem;
-    font-weight: 700;
-    border: none;
-    background: none;
-    color: var(--ink-light);
-    cursor: pointer;
-    border-bottom: 3px solid transparent;
-    margin-bottom: -2px;
-    transition: color 0.12s, border-color 0.12s;
-  }
-  .alert-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .alert-tab-btn:hover:not(.active) { color: var(--ink); }
-  .alert-tab-panel { display: none; }
-  .alert-tab-panel.active { display: block; }
-
   .alert-field {
     margin-bottom: 13px;
   }
@@ -450,32 +425,6 @@
   }
   .alert-submit-btn:hover { background: var(--accent-hover); }
   .alert-submit-btn:disabled { opacity: 0.6; cursor: default; }
-  .alert-tg-deeplink-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    background: #229ED9;
-    color: #fff;
-    border: none;
-    border-radius: 7px;
-    padding: 11px 0;
-    font-size: 0.9rem;
-    font-weight: 700;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 0.15s;
-    margin-top: 4px;
-  }
-  .alert-tg-deeplink-btn:hover { background: #1a8abf; }
-  .alert-tg-note {
-    font-size: 0.75rem;
-    color: var(--ink-light);
-    text-align: center;
-    margin-top: 8px;
-    line-height: 1.5;
-  }
   .alert-wa-note {
     font-size: 0.73rem;
     color: var(--ink-light);
@@ -889,46 +838,23 @@
       <input id="alert-ahead" type="number" min="0" max="50" value="5">
     </div>
 
-    <!-- Tabs -->
-    <div class="alert-tabs">
-      <button class="alert-tab-btn active" id="tab-tg-btn" onclick="switchAlertTab('telegram')">
-        📱 Telegram
-      </button>
-      <button class="alert-tab-btn" id="tab-wa-btn" onclick="switchAlertTab('whatsapp')">
-        💬 WhatsApp
-      </button>
+    <!-- WhatsApp alert -->
+    <div class="alert-wa-note">
+      <strong>First time?</strong> Save our number and send<br>
+      <code id="wa-join-keyword" style="font-size:0.8rem;background:#f5f5f5;padding:2px 5px;border-radius:3px;">join friend-may</code>
+      to <a href="https://wa.me/14155238886?text=join%20friend-may" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">+1 415 523 8886</a> on WhatsApp to opt in.<br>
+      You only need to do this once.
     </div>
-
-    <!-- Telegram tab -->
-    <div class="alert-tab-panel active" id="tab-telegram">
-      <a class="alert-tg-deeplink-btn" id="alert-tg-link" href="#" target="_blank" rel="noopener">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.01 9.478c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.873.743z"/></svg>
-        Open in Telegram Bot
-      </a>
-      <p class="alert-tg-note">
-        Opens @Eventtrace_bot in Telegram. Tap <strong>START</strong> — alert is linked to your account instantly.
-      </p>
+    <div class="alert-field">
+      <label>Your WhatsApp number (with country code)</label>
+      <input id="alert-phone" type="tel" placeholder="+919876543210">
     </div>
-
-    <!-- WhatsApp tab -->
-    <div class="alert-tab-panel" id="tab-whatsapp">
-      <div class="alert-wa-note">
-        <strong>First time?</strong> Save our number and send<br>
-        <code id="wa-join-keyword" style="font-size:0.8rem;background:#f5f5f5;padding:2px 5px;border-radius:3px;">join friend-may</code>
-        to <a href="https://wa.me/14155238886?text=join%20friend-may" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">+1 415 523 8886</a> on WhatsApp to opt in.<br>
-        You only need to do this once.
-      </div>
-      <div class="alert-field">
-        <label>Your WhatsApp number (with country code)</label>
-        <input id="alert-phone" type="tel" placeholder="+919876543210">
-      </div>
-      <div class="alert-field">
-        <label>Your name (optional)</label>
-        <input id="alert-name" type="text" placeholder="Adv. Sharma">
-      </div>
-      <button class="alert-submit-btn" id="alert-submit-btn">Save WhatsApp Alert</button>
-      <div id="alert-result"></div>
+    <div class="alert-field">
+      <label>Your name (optional)</label>
+      <input id="alert-name" type="text" placeholder="Adv. Sharma">
     </div>
+    <button class="alert-submit-btn" id="alert-submit-btn">Save WhatsApp Alert</button>
+    <div id="alert-result"></div>
   </div>
 </div>
 
@@ -1565,41 +1491,6 @@ fetchAndRender();
 
 // ── Alert modal ───────────────────────────────────────────────────────────────
 
-const TG_BOT_USERNAME = 'Eventtrace_bot';
-
-function _buildDeepLink() {
-  const room   = document.getElementById('alert-room').value;
-  const serial = document.getElementById('alert-serial').value;
-  const ahead  = document.getElementById('alert-ahead').value || '5';
-  const date   = document.getElementById('alert-date').value;
-  if (!room || !serial || !date) return null;
-  const payload = `watch_${room}_${serial}_${ahead}_${date}`;
-  return `https://t.me/${TG_BOT_USERNAME}?start=${payload}`;
-}
-
-function _refreshTgLink() {
-  const link = document.getElementById('alert-tg-link');
-  const url = _buildDeepLink();
-  if (url) {
-    link.href = url;
-    link.style.opacity = '1';
-    link.style.pointerEvents = '';
-  } else {
-    link.href = '#';
-    link.style.opacity = '0.45';
-    link.style.pointerEvents = 'none';
-  }
-}
-
-function switchAlertTab(tab) {
-  document.getElementById('tab-telegram').classList.toggle('active', tab === 'telegram');
-  document.getElementById('tab-whatsapp').classList.toggle('active', tab === 'whatsapp');
-  document.getElementById('tab-tg-btn').classList.toggle('active', tab === 'telegram');
-  document.getElementById('tab-wa-btn').classList.toggle('active', tab === 'whatsapp');
-  document.getElementById('alert-result').textContent = '';
-  document.getElementById('alert-result').className = '';
-}
-
 function showAlertModal(event, idx) {
   event.stopPropagation();
   const row = rowStore[idx];
@@ -1617,18 +1508,9 @@ function showAlertModal(event, idx) {
   document.getElementById('alert-result').className = '';
   document.getElementById('alert-submit-btn').disabled = false;
 
-  // Reset to Telegram tab
-  switchAlertTab('telegram');
-  _refreshTgLink();
-
   document.getElementById('alert-modal-overlay').classList.add('open');
   setTimeout(() => document.getElementById('alert-serial').focus(), 80);
 }
-
-// Refresh deep link whenever shared fields change
-['alert-serial', 'alert-ahead', 'alert-date'].forEach(id => {
-  document.getElementById(id).addEventListener('input', _refreshTgLink);
-});
 
 document.getElementById('alert-modal-close').addEventListener('click', () => {
   document.getElementById('alert-modal-overlay').classList.remove('open');

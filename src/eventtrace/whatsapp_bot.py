@@ -73,10 +73,13 @@ def _build_alert_message(payload: dict) -> str:
 # ── Helpers (shared with Telegram bot logic) ──────────────────────────────────
 
 def _get_room_serial(db: DB, room_no: str) -> int | None:
+    today = _today_ist()
     states = db.list_current_state()
     serials: list[int] = []
     for entry in states:
         data = entry.get("data", {})
+        if data.get("hearing_date") != today:
+            continue
         if str(data.get("room_no", "")) == room_no:
             try:
                 parts = str(data.get("cause_list_sr_no", "")).split("-")
@@ -87,10 +90,13 @@ def _get_room_serial(db: DB, room_no: str) -> int | None:
 
 
 def _all_rooms_summary(db: DB) -> list[dict]:
+    today = _today_ist()
     states = db.list_current_state()
     rooms: dict[str, dict] = {}
     for entry in states:
         data = entry.get("data", {})
+        if data.get("hearing_date") != today:
+            continue
         room_no = str(data.get("room_no", "")).strip()
         if not room_no:
             continue
@@ -118,7 +124,7 @@ def handle_inbound(form: dict[str, Any], db: DB) -> str:
     parts = body.split()
     cmd = parts[0].upper()
 
-    if cmd in ("HELP", "START", "HI", "HELLO"):
+    if cmd in ("HELP", "START", "HI", "HII", "HIII", "HELLO", "HEY", "NAMASTE", "NAM"):
         return _help_text()
 
     if cmd == "TODAY":
@@ -139,6 +145,12 @@ def handle_inbound(form: dict[str, Any], db: DB) -> str:
     if cmd == "LIST":
         return _cmd_list(db, phone)
 
+    if cmd in ("CAUSELIST", "CAUSE"):
+        return _cmd_causelist(db)
+
+    if cmd == "ZOOM" and len(parts) >= 2:
+        return _cmd_zoom(db, parts[1])
+
     return (
         "Command not recognised.\n\n"
         "Try: WATCH 8 205  or  STATUS 8  or  LIST\n"
@@ -150,7 +162,9 @@ def _help_text() -> str:
     return (
         "🏛 *Eventtrace — Calcutta High Court Alerts*\n\n"
         "Commands:\n"
-        "TODAY — all active courts\n"
+        "TODAY — active courts on live board (today only)\n"
+        "CAUSELIST — today's courts with VC links\n"
+        "ZOOM 8 — Zoom link for room 8\n"
         "DAILY — your alerts + all active courts\n"
         "STATUS 8 — current serial for room 8\n"
         "WATCH 8 205 — alert when room 8 reaches serial 200\n"
@@ -162,17 +176,83 @@ def _help_text() -> str:
     )
 
 
+def _monitor_stale_warning(db: DB) -> str:
+    """Returns a warning string if monitor hasn't polled in >5 min, else ''."""
+    last = db.get_monitor_state("last_successful_poll")
+    if not last:
+        return ""
+    try:
+        from datetime import timezone as _tz
+        last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+        age_min = (datetime.now(_tz.utc) - last_dt).total_seconds() / 60
+        if age_min > 5:
+            return f"\n\n⚠️ Monitor last updated {int(age_min)}m ago — data may be stale."
+    except Exception:
+        pass
+    return ""
+
+
 def _cmd_today(db: DB) -> str:
+    today = _today_ist()
     rooms = _all_rooms_summary(db)
+    warning = _monitor_stale_warning(db)
+    vc_links = db.get_vc_zoom_links(today)
+
     if not rooms:
-        return "No court data right now. Court may not be in session."
-    vc_links = db.get_vc_zoom_links(_today_ist())
-    lines = ["📋 Active courts:\n"]
+        vc_count = len(vc_links)
+        now_ist = datetime.now(_IST)
+        if now_ist.hour < 10 or (now_ist.hour == 10 and now_ist.minute < 30):
+            msg = (
+                f"🏛 Board not live yet for {today}.\n"
+                "Court display usually starts at 10:30 AM IST.\n\n"
+            )
+        else:
+            msg = f"🏛 No court data on board for {today} yet.\n\n"
+        if vc_count:
+            msg += f"📋 Today's cause list has *{vc_count} courts* with VC links.\nSend CAUSELIST to see them."
+        else:
+            msg += "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+        if warning:
+            msg += warning
+        return msg
+
+    lines = [f"📋 Active courts ({today}):\n"]
     for r in rooms:
         vc = "📹" if r["room_no"] in vc_links else "🏛"
         lines.append(f"{vc} Room {r['room_no']} — Serial {r['serial']}")
-    lines.append("\nSend WATCH <room> <serial> to set alert.")
+    lines.append("\nSend WATCH [room] [serial] to set alert.")
+    if warning:
+        lines.append(warning)
     return "\n".join(lines)
+
+
+def _cmd_causelist(db: DB) -> str:
+    today = _today_ist()
+    vc_links = db.get_vc_zoom_links(today)
+    if not vc_links:
+        return (
+            f"📋 No cause list data for {today} yet.\n"
+            "The cause list is usually published by 9–10 AM on court days.\n"
+            "Check: calcuttahighcourt.gov.in"
+        )
+    rooms = sorted(vc_links.keys(), key=lambda r: r.zfill(6))
+    room_list = ", ".join(f"Room {r}" for r in rooms)
+    return (
+        f"📋 Cause list — {today} ({len(rooms)} courts with VC):\n\n"
+        f"{room_list}\n\n"
+        "Send *ZOOM [room]* for the link.\nExample: ZOOM 8"
+    )
+
+
+def _cmd_zoom(db: DB, room_no: str) -> str:
+    today = _today_ist()
+    vc_links = db.get_vc_zoom_links(today)
+    # match regardless of leading zeros
+    canonical = room_no.lstrip("0") or room_no
+    url = next((vc_links[k] for k in vc_links if (k.lstrip("0") or k) == canonical), None)
+    if not url:
+        return f"📹 No VC link for Room {room_no} on {today}.\nSend CAUSELIST to see available rooms."
+    return f"📹 Room {room_no} — {today}\n{url}"
 
 
 def _cmd_daily(db: DB, phone: str) -> str:
@@ -212,13 +292,16 @@ def _cmd_daily(db: DB, phone: str) -> str:
 
 def _cmd_status(db: DB, room_no: str) -> str:
     current = _get_room_serial(db, room_no)
+    warning = _monitor_stale_warning(db)
     if current is None:
-        return f"Room {room_no}: no data. Send TODAY to see active rooms."
+        return f"Room {room_no}: no data. Send TODAY to see active rooms." + warning
     vc_links = db.get_vc_zoom_links(_today_ist())
     lines = [f"🏛 Room {room_no} — Serial: {current}"]
     if room_no in vc_links:
         lines.append(f"📹 VC: {vc_links[room_no]}")
-    lines.append(f"\nSet alert: WATCH {room_no} <your serial>")
+    lines.append(f"\nSet alert: WATCH {room_no} [your serial]")
+    if warning:
+        lines.append(warning)
     return "\n".join(lines)
 
 
@@ -229,7 +312,7 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
         target = int(parts[2])
         ahead = int(parts[3]) if len(parts) >= 4 else 5
     except (ValueError, IndexError):
-        return "Usage: WATCH <room> <serial> [ahead]\nExample: WATCH 8 205"
+        return "Usage: WATCH [room] [serial] [ahead]\nExample: WATCH 8 205"
 
     if ahead < 0 or ahead > 50:
         return "ahead must be 0–50."
@@ -251,13 +334,32 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
         phone=phone,
     )
     alert_at = target - ahead
-    return (
+    msg = (
         f"✅ Alert set for Room {room_no}\n"
         f"Hearing date: {hearing_date}\n"
         f"Your serial: {target}\n"
         f"Alert fires when serial ≥ {alert_at}\n\n"
         f"Cancel: UNWATCH {room_no}"
     )
+
+    # Fire alert immediately if board is live and serial already at/past threshold
+    current = _get_room_serial(db, room_no)
+    if current is not None and current >= alert_at:
+        today_str = _today_ist()
+        vc_links = db.get_vc_zoom_links(today_str)
+        alert = _build_alert_message({
+            "room_no": room_no,
+            "current_serial": current,
+            "target_serial": target,
+            "zoom_url": vc_links.get(room_no, ""),
+        })
+        if current >= target:
+            note = f"⚠️ Your case serial ({target}) may already have been called."
+        else:
+            note = f"⚠️ Alert threshold ({alert_at}) already passed."
+        return f"{msg}\n\n{note}\n\n{alert}"
+
+    return msg
 
 
 def _cmd_unwatch(db: DB, phone: str, room_no: str) -> str:
@@ -266,11 +368,10 @@ def _cmd_unwatch(db: DB, phone: str, room_no: str) -> str:
 
 
 def _cmd_list(db: DB, phone: str) -> str:
-    # WhatsApp subscriptions are keyed by phone, not telegram_id
-    # We query by phone column
     subs = _list_wa_subscriptions(db, phone)
+    warning = _monitor_stale_warning(db)
     if not subs:
-        return "No active alerts.\n\nSend WATCH <room> <serial> to set one."
+        return "No active alerts.\n\nSend WATCH [room] [serial] to set one." + warning
     lines = ["🔔 Your active alerts:\n"]
     for s in subs:
         current = _get_room_serial(db, str(s["room_no"]))
@@ -280,7 +381,9 @@ def _cmd_list(db: DB, phone: str) -> str:
             f"• Room {s['room_no']} — serial {s['target_serial']}\n"
             f"  Date: {date_str} · Alert at {s['target_serial'] - s['look_ahead']}{cur_str}"
         )
-    lines.append("\nCancel: UNWATCH <room>")
+    lines.append("\nCancel: UNWATCH [room]")
+    if warning:
+        lines.append(warning)
     return "\n".join(lines)
 
 

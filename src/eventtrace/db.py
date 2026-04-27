@@ -122,6 +122,15 @@ class DB:
                 """
             )
 
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS monitor_state (
+                  key   TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                """
+            )
+
             # Non-destructive column migrations — safe to re-run
             for _col_sql in [
                 "ALTER TABLE subscriptions ADD COLUMN hearing_date TEXT",
@@ -129,6 +138,8 @@ class DB:
                 "ALTER TABLE subscriptions ADD COLUMN last_notified_serial INTEGER",
                 "ALTER TABLE subscriptions ADD COLUMN display_name TEXT",
                 "ALTER TABLE subscriptions ADD COLUMN phone TEXT",
+                "ALTER TABLE subscriptions ADD COLUMN alerted_at TEXT",
+                "ALTER TABLE subscriptions ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0",
             ]:
                 try:
                     con.execute(_col_sql)
@@ -444,3 +455,47 @@ class DB:
                 "INSERT INTO notification_log(sub_id, sent_at, payload) VALUES(?, ?, ?)",
                 (sub_id, iso(utc_now()), payload),
             )
+
+    def mark_alerted(self, sub_id: int) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE subscriptions SET alerted_at=? WHERE id=?",
+                (iso(utc_now()), sub_id),
+            )
+
+    def mark_reminder_sent(self, sub_id: int) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE subscriptions SET reminder_sent=1 WHERE id=?",
+                (sub_id,),
+            )
+
+    def deactivate_subscription(self, sub_id: int) -> None:
+        with self.connect() as con:
+            con.execute("UPDATE subscriptions SET active=0 WHERE id=?", (sub_id,))
+
+    def list_active_subscriptions_for_room(self, room_no: str, today: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT * FROM subscriptions WHERE active=1 AND room_no=?"
+                " AND (hearing_date IS NULL OR hearing_date=?)",
+                (room_no, today),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Monitor state ────────────────────────────────────────────────────────
+
+    def set_monitor_state(self, key: str, value: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "INSERT INTO monitor_state(key, value) VALUES(?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+    def get_monitor_state(self, key: str) -> str | None:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT value FROM monitor_state WHERE key=?", (key,)
+            ).fetchone()
+        return row["value"] if row else None

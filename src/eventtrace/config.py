@@ -55,3 +55,5 @@ class Settings:
         self.twilio_whatsapp_from = _get_env("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
         # Bot username used to build deep links e.g. "Eventtrace_bot"
         self.telegram_bot_username = _get_env("TELEGRAM_BOT_USERNAME", "Eventtrace_bot")
+        # Public base URL for webhook signature verification (e.g. https://abc.ngrok-free.app)
+        self.public_url = _get_env("CHD_PUBLIC_URL", "")

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
+import hmac
 import io
 import logging
 import os
@@ -8,7 +11,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -35,6 +38,16 @@ def _today_ist() -> str:
 
 
 log = logging.getLogger(__name__)
+
+
+def _verify_twilio_signature(auth_token: str, signature: str, url: str, params: dict) -> bool:
+    """Validate X-Twilio-Signature per Twilio's HMAC-SHA1 scheme."""
+    # Build the string to sign: URL + sorted key=value pairs
+    s = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
+    expected = base64.b64encode(
+        hmac.new(auth_token.encode(), s.encode(), hashlib.sha1).digest()
+    ).decode()
+    return hmac.compare_digest(expected, signature)
 
 
 def create_app() -> FastAPI:
@@ -146,8 +159,12 @@ def create_app() -> FastAPI:
 
     # ── Alert signup ─────────────────────────────────────────────────────────
 
+    _alert_api_key = os.getenv("CHD_ALERT_API_KEY", "")
+
     @app.post("/alert", status_code=201)
-    def create_alert(req: AlertRequest) -> dict:
+    def create_alert(req: AlertRequest, x_api_key: str | None = Header(default=None)) -> dict:
+        if _alert_api_key and x_api_key != _alert_api_key:
+            raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key")
         date = req.hearing_date or _today_ist()
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
             raise HTTPException(status_code=422, detail="hearing_date must be YYYY-MM-DD")
@@ -190,6 +207,18 @@ def create_app() -> FastAPI:
         from .whatsapp_bot import handle_inbound
         form = await request.form()
         form_dict = dict(form)
+
+        # Verify Twilio signature when auth token is configured
+        if settings.twilio_auth_token:
+            sig = request.headers.get("X-Twilio-Signature", "")
+            # Behind ngrok/reverse proxy, reconstruct the public URL Twilio signed against.
+            # CHD_PUBLIC_URL overrides (e.g. "https://abc.ngrok-free.app"); fallback to request.url.
+            public_base = os.getenv("CHD_PUBLIC_URL", "").rstrip("/")
+            url = (public_base + str(request.url.path)) if public_base else str(request.url)
+            if not _verify_twilio_signature(settings.twilio_auth_token, sig, url, form_dict):
+                log.warning("WhatsApp webhook: invalid Twilio signature from %s", request.client)
+                raise HTTPException(status_code=403, detail="Invalid signature")
+
         try:
             reply = handle_inbound(form_dict, db)
         except Exception as exc:

@@ -353,6 +353,45 @@
     * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 
+  /* ── VC Links panel ────────────────────────────────────────────────────────── */
+  .vc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 8px;
+    padding: 14px 16px;
+  }
+  .vc-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .vc-card.active { border-color: #b9e7cc; background: #f4fcf7; }
+  .vc-card.absent { opacity: 0.65; }
+  .vc-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .vc-room { font-weight: 700; font-size: 0.92rem; color: var(--ink-900); }
+  .vc-status {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid;
+  }
+  .vc-status.on-board  { color: #157042; background: #e9f8ef; border-color: #b9e7cc; }
+  .vc-status.off-board { color: var(--ink-500); background: var(--soft); border-color: var(--line); }
+  .vc-link-wrap { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vc-link-wrap a { color: var(--accent); text-decoration: none; }
+  .vc-link-wrap a:hover { text-decoration: underline; }
+  .vc-judge { font-size: 0.78rem; color: var(--ink-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   /* ── Room info icon + popup ─────────────────────────────────────────────── */
   .court-cell {
     display: flex;
@@ -544,6 +583,23 @@
     </section>
 
   </div>
+
+  <!-- VC Links -->
+  <section class="panel" aria-labelledby="vc-title">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2 id="vc-title">VC Links</h2>
+        <p>Zoom links from today's cause list — matched to live board courts</p>
+      </div>
+      <div class="controls">
+        <input id="vc-date" type="date" aria-label="VC links date" style="min-width:150px;">
+        <span class="value" id="vc-count" style="font-size:0.82rem;color:var(--ink-500);white-space:nowrap;"></span>
+      </div>
+    </div>
+    <div id="vc-grid" class="vc-grid">
+      <div class="empty" style="grid-column:1/-1">Loading…</div>
+    </div>
+  </section>
 
   <!-- History -->
   <section class="panel" aria-labelledby="hist-title">
@@ -957,6 +1013,7 @@ function startAutoRefresh(sec) {
 
 async function refreshAll() {
   await Promise.all([checkHealth(), loadCurrentState(), loadEventTraces()]);
+  await loadVcLinks(); // after current state so onBoard set is populated
   document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
 }
 
@@ -1047,6 +1104,64 @@ function renderHistoryDay(rows, date) {
   document.getElementById("hist-body").innerHTML = html;
 }
 
+// ── VC Links ──────────────────────────────────────────────────────────────────
+// Mapping: vc_zoom_link.room_no == current_state.court_id
+// (court_id is built from CHD_KEY_FIELDS=court_no, and room_no in the cause list
+//  is the same value as court_no on the display board)
+const vcState = { links: {} }; // {room_no: zoom_url}
+
+async function loadVcLinks() {
+  const dateInput = document.getElementById("vc-date").value;
+  const url = BASE + "/vc-links" + (dateInput ? "?date=" + encodeURIComponent(dateInput) : "");
+  try {
+    const r = await fetch(url);
+    vcState.links = await r.json();
+  } catch {
+    vcState.links = {};
+  }
+  renderVcLinks();
+}
+
+function renderVcLinks() {
+  const links = vcState.links;
+  const rooms = Object.keys(links).sort((a, b) => Number(a) - Number(b));
+  const grid = document.getElementById("vc-grid");
+  const countEl = document.getElementById("vc-count");
+
+  if (!rooms.length) {
+    grid.innerHTML = "<div class='empty' style='grid-column:1/-1'>No VC links found for this date.</div>";
+    countEl.textContent = "";
+    return;
+  }
+
+  // Build set of court_ids currently on the live board (present)
+  const onBoard = new Set(appState.current.map(r => String(r.court_id)));
+  let activeCount = 0;
+
+  const cards = rooms.map(room => {
+    const url = links[room];
+    const isActive = onBoard.has(room);
+    if (isActive) activeCount++;
+
+    // find judge name from current_state for this court
+    const stateRow = appState.current.find(r => String(r.court_id) === room);
+    const judges = stateRow ? (stateRow.data || {}).judge_names || "" : "";
+
+    return "<div class='vc-card " + (isActive ? "active" : "absent") + "'>"
+      + "<div class='vc-card-header'>"
+      + "<span class='vc-room'>Court " + safe(room) + "</span>"
+      + "<span class='vc-status " + (isActive ? "on-board" : "off-board") + "'>"
+      + (isActive ? "On board" : "Not live") + "</span>"
+      + "</div>"
+      + (judges ? "<div class='vc-judge'>" + safe(judges) + "</div>" : "")
+      + "<div class='vc-link-wrap'><a href='" + safe(url) + "' target='_blank' rel='noopener'>" + safe(url) + "</a></div>"
+      + "</div>";
+  }).join("");
+
+  grid.innerHTML = cards;
+  countEl.textContent = rooms.length + " links · " + activeCount + " on board";
+}
+
 // ── Wire up ───────────────────────────────────────────────────────────────────
 document.getElementById("refresh-now").addEventListener("click", refreshAll);
 document.getElementById("refresh-interval").addEventListener("change", e => startAutoRefresh(Number(e.target.value)));
@@ -1074,6 +1189,13 @@ document.getElementById("et-export").addEventListener("click", exportEventTraces
 document.getElementById("hist-date").addEventListener("change", e => {
   if (e.target.value) loadHistoryDay(e.target.value);
 });
+document.getElementById("vc-date").addEventListener("change", loadVcLinks);
+
+// default vc-date to today IST
+(function() {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  document.getElementById("vc-date").value = today;
+})();
 
 refreshAll();
 loadHistoryDates();

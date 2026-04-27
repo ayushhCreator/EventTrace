@@ -52,6 +52,42 @@ chd-api
 
 ---
 
+## Systemd services (auto-start on boot)
+
+Three user services manage the processes permanently — no manual terminal needed.
+
+| Service | Command | What it does |
+|---------|---------|--------------|
+| `eventtrace-api` | `chd-api` | FastAPI on port 8009 |
+| `eventtrace-monitor` | `chd-run-monitor` | Scraper poll loop |
+| `eventtrace-bot` | `chd-bot` | Telegram bot |
+
+### Common commands
+
+```bash
+# Status of all three
+systemctl --user status eventtrace-api eventtrace-monitor eventtrace-bot
+
+# Live logs
+journalctl --user -u eventtrace-api -f
+journalctl --user -u eventtrace-monitor -f
+journalctl --user -u eventtrace-bot -f
+
+# Last 50 lines
+journalctl --user -u eventtrace-api -n 50
+
+# Restart a service
+systemctl --user restart eventtrace-api
+
+# Stop / start
+systemctl --user stop eventtrace-monitor
+systemctl --user start eventtrace-monitor
+```
+
+> **Note:** Port 8009 is held by `eventtrace-api.service` at all times. Do **not** run `chd-api` manually — it will conflict. Use `journalctl` to read logs instead.
+
+---
+
 ## Viewing data
 
 ### Dashboard (recommended)

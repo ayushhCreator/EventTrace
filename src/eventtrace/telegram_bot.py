@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config import Settings
 from .db import DB
@@ -423,6 +423,17 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+# ── Catch-all: redirect to WhatsApp ─────────────────────────────────────────
+
+async def cmd_redirect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "This bot is no longer active.\n\n"
+        "Please use *WhatsApp* for court alerts:\n"
+        "Send HELP to *+1 415 523 8886* on WhatsApp to get started.",
+        parse_mode="Markdown",
+    )
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -440,14 +451,15 @@ def main() -> None:
     app.bot_data["settings"] = settings
     app.bot_data["db"] = db
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_start))
-    app.add_handler(CommandHandler("today", cmd_today))
-    app.add_handler(CommandHandler("daily", cmd_daily))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("watch", cmd_watch))
-    app.add_handler(CommandHandler("unwatch", cmd_unwatch))
-    app.add_handler(CommandHandler("list", cmd_list))
+    app.add_handler(CommandHandler("start",   cmd_redirect))
+    app.add_handler(CommandHandler("help",    cmd_redirect))
+    app.add_handler(CommandHandler("today",   cmd_redirect))
+    app.add_handler(CommandHandler("daily",   cmd_redirect))
+    app.add_handler(CommandHandler("status",  cmd_redirect))
+    app.add_handler(CommandHandler("watch",   cmd_redirect))
+    app.add_handler(CommandHandler("unwatch", cmd_redirect))
+    app.add_handler(CommandHandler("list",    cmd_redirect))
+    app.add_handler(MessageHandler(filters.ALL, cmd_redirect))
 
     log.info("Eventtrace bot starting (polling)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

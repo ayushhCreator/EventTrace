@@ -40,7 +40,12 @@ def _extract_vc_links(text: str) -> dict[str, str]:
         vc_match = _VC_LINK_RE.search(block_text)
         if vc_match:
             zoom_url = vc_match.group(1).strip().rstrip(".,;)")
-            result[room_no] = zoom_url
+            if room_no in result and result[room_no] != zoom_url:
+                log.warning("Court %s has conflicting VC links: %s vs %s — keeping first", room_no, result[room_no], zoom_url)
+            elif room_no in result:
+                log.debug("Court %s duplicated in cause list (same URL), skipping", room_no)
+            else:
+                result[room_no] = zoom_url
     return result
 
 
