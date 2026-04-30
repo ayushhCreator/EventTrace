@@ -1,4 +1,4 @@
-.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape
+.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape scheduler
 
 # ── Local Postgres ────────────────────────────────────────────────────────────
 
@@ -40,3 +40,6 @@ monitor:
 scrape:
 	@export $$(cat .env | grep -v '^#' | xargs) && \
 	  .venv/bin/chd-scrape-causelist $(DATE) --store
+
+scheduler:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/chd-schedule-causelist

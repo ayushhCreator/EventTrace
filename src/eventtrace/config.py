@@ -70,3 +70,5 @@ class Settings:
         # PostgreSQL DSN — if set, all processes use Postgres instead of SQLite
         # e.g. postgresql://user:pass@localhost:5432/eventtrace
         self.database_url = _get_env("DATABASE_URL", "") or None
+        # Telegram chat ID for admin alerts (causelist scrape failures etc.)
+        self.admin_chat_id = _get_env("ADMIN_CHAT_ID", "") or None
