@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+# Auto-load .env from project root (non-fatal if missing or dotenv not installed)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / ".env", override=False)
+except ImportError:
+    pass
+
+
 def _get_env(name: str, default: str) -> str:
     value = os.getenv(name)
     return default if value is None or value == "" else value
@@ -57,3 +67,6 @@ class Settings:
         self.telegram_bot_username = _get_env("TELEGRAM_BOT_USERNAME", "Eventtrace_bot")
         # Public base URL for webhook signature verification (e.g. https://abc.ngrok-free.app)
         self.public_url = _get_env("CHD_PUBLIC_URL", "")
+        # PostgreSQL DSN — if set, all processes use Postgres instead of SQLite
+        # e.g. postgresql://user:pass@localhost:5432/eventtrace
+        self.database_url = _get_env("DATABASE_URL", "") or None

@@ -17,15 +17,34 @@ python -m playwright install
 | Start monitor loop | `chd-run-monitor` |
 | Start API | `chd-api` |
 | Init session (only if JSON stops working) | `chd-init-session` |
+| Scrape causelist | `chd-scrape-causelist YYYY-MM-DD --store` |
 | Lint | `ruff check src/` |
 | Format | `ruff format src/` |
 
 API runs at `http://127.0.0.1:8009` by default. Override with `CHD_API_HOST` / `CHD_API_PORT`.
 UI at `http://127.0.0.1:8009/ui`.
 
+## Local Postgres (Docker)
+
+```bash
+make db          # start Postgres on :5432
+make schema      # create all tables in Postgres
+make pgadmin     # pgAdmin UI at http://localhost:5050 (admin@local.dev / admin)
+make db-stop     # stop containers
+make db-reset    # wipe and restart (destroys data)
+```
+
+Set `DATABASE_URL` in `.env` (already configured for Docker). Leave empty to fall back to SQLite.
+
 ## Architecture
 
-Three independent processes share a single SQLite DB (`eventtrace.sqlite3`, WAL mode):
+Two DB backends, same code:
+- `DATABASE_URL` set → `PostgresDB` (psycopg2, connection pool)
+- `DATABASE_URL` empty → `DB` (SQLite WAL, file-based)
+
+`get_db(settings)` in `db.py` picks the right one. All five processes use `get_db()`.
+
+Three independent processes share the DB:
 
 ```
 init_session  →  .state/storage_state.json   (one-time manual CAPTCHA)

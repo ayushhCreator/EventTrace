@@ -10,7 +10,7 @@ from typing import Any
 from .causelist_scraper import scrape_and_store_vc_links
 from .change_detector import apply_snapshot
 from .config import Settings
-from .db import DB, utc_now
+from .db import get_db, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def _mark_vc_scraped(for_date: date, window_hour: int) -> None:
         _vc_scraped.setdefault(date_str, set()).add(window_hour)
 
 
-def _run_vc_scrape(for_date: date, window_hour: int, settings: Settings, db: DB) -> None:
+def _run_vc_scrape(for_date: date, window_hour: int, settings: Settings, db: Any) -> None:
     try:
         links = scrape_and_store_vc_links(for_date, settings, db)
         _mark_vc_scraped(for_date, window_hour)
@@ -113,7 +113,7 @@ def _run_vc_scrape(for_date: date, window_hour: int, settings: Settings, db: DB)
         log.warning("VC scrape failed for %s: %s", for_date, exc)
 
 
-def _vc_scheduler_thread(settings: Settings, db: DB) -> None:
+def _vc_scheduler_thread(settings: Settings, db: Any) -> None:
     """Background thread: triggers VC scrapes at the 4 daily windows."""
     while True:
         try:
@@ -197,7 +197,7 @@ _FAILURE_NOTIFY_THRESHOLD = 5   # consecutive failures before warning
 _failure_outage_notified = False  # only notify once per outage
 
 
-def _notify_monitor_down(db: DB, settings: Settings) -> None:
+def _notify_monitor_down(db: Any, settings: Settings) -> None:
     today_str = _today_ist().isoformat()
     subs = db.list_active_subscriptions(today=today_str)
     for sub in subs:
@@ -216,7 +216,7 @@ def _notify_monitor_down(db: DB, settings: Settings) -> None:
 # ── Fix 2: Court adjournment notifications ────────────────────────────────────
 
 def _notify_adjournments(
-    changes: list, snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
+    changes: list, snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
 ) -> None:
     """Detect courts that just left the board; notify subscribers whose serial wasn't reached."""
     today_str = _today_ist().isoformat()
@@ -264,7 +264,7 @@ _REMINDER_DELAY_SECONDS = 15 * 60  # 15 minutes after alert fired
 
 
 def _send_reminders(
-    snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
+    snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
 ) -> None:
     """If alert fired >15 min ago and serial has passed target, send reminder."""
     today_str = _today_ist().isoformat()
@@ -311,7 +311,7 @@ def _send_reminders(
 # ── Alert dispatch ────────────────────────────────────────────────────────────
 
 def _dispatch_notifications(
-    snapshot: dict[str, dict[str, Any]], db: DB, settings: Settings
+    snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
 ) -> None:
     today_str = _today_ist().isoformat()
     subs = db.list_active_subscriptions(today=today_str)
@@ -325,7 +325,6 @@ def _dispatch_notifications(
         target = int(sub["target_serial"])
         look_ahead = int(sub["look_ahead"])
         alert_threshold = target - look_ahead
-        last_notified = sub.get("last_notified_serial")
 
         # Fire only once — skip if already alerted
         if sub.get("alerted_at"):
@@ -384,13 +383,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = Settings()
-    db = DB(settings.db_path)
+    db = get_db(settings)
     db.ensure_schema()
 
     from .scraper import scrape_table_once_sync
 
     print(f"Monitoring {settings.url}")
-    print(f"DB: {settings.db_path}")
+    db_label = settings.database_url or settings.db_path
+    print(f"DB: {db_label}")
     print(f"Poll seconds: {settings.poll_seconds}")
 
     # Start VC scrape scheduler in background

@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
-from .db import DB
+from .db import get_db
 
 _UI_DIR = Path(__file__).parent / "ui"
 
@@ -52,7 +52,7 @@ def _verify_twilio_signature(auth_token: str, signature: str, url: str, params: 
 
 def create_app() -> FastAPI:
     settings = Settings()
-    db = DB(settings.db_path)
+    db = get_db(settings)
     db.ensure_schema()
 
     app = FastAPI(title="CHD EventTrace", version="0.2.0")
@@ -237,6 +237,55 @@ def create_app() -> FastAPI:
             f"<Response><Message>{reply}</Message></Response>"
         )
         return HTMLResponse(content=twiml, media_type="application/xml")
+
+    # ── Causelist ────────────────────────────────────────────────────────────
+    # NOTE: static paths (/dates, /search) MUST come before /{list_date} or
+    # FastAPI matches "dates"/"search" as a list_date value.
+
+    @app.get("/causelist/dates")
+    def causelist_dates() -> list[str]:
+        return db.list_causelist_dates()
+
+    @app.get("/causelist/search")
+    def causelist_search(
+        case_ref: str | None = Query(None),
+        advocate: str | None = Query(None),
+        party: str | None = Query(None),
+        date_from: str | None = Query(None),
+        date_to: str | None = Query(None),
+        limit: int = Query(100, ge=1, le=500),
+    ) -> list[dict]:
+        if not any([case_ref, advocate, party]):
+            raise HTTPException(status_code=422, detail="Provide at least one of: case_ref, advocate, party")
+        return db.search_causelist_cases(
+            case_ref=case_ref, advocate=advocate, party=party,
+            date_from=date_from, date_to=date_to, limit=limit,
+        )
+
+    @app.get("/causelist/{list_date}")
+    def causelist_summary(list_date: str) -> list[dict]:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", list_date):
+            raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+        return db.list_causelist_benches(list_date)
+
+    @app.get("/causelist/{list_date}/court/{court_no}")
+    def causelist_court(list_date: str, court_no: str) -> dict:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", list_date):
+            raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+        bench = db.get_causelist_bench(list_date, court_no)
+        if not bench:
+            raise HTTPException(status_code=404, detail="Court not found for that date")
+        cases = db.list_causelist_cases(list_date, court_no)
+        return {"bench": bench, "cases": cases}
+
+    @app.get("/causelist/{list_date}/court/{court_no}/serial/{serial_no}")
+    def causelist_serial(list_date: str, court_no: str, serial_no: int) -> dict:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", list_date):
+            raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+        row = db.get_causelist_case_by_serial(list_date, court_no, serial_no)
+        if not row:
+            raise HTTPException(status_code=404, detail="Case not found")
+        return row
 
     # ── UI pages ─────────────────────────────────────────────────────────────
 

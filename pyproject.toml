@@ -11,6 +11,10 @@ dependencies = [
   "python-telegram-bot>=21.0",
   "httpx>=0.27.0",
   "python-multipart>=0.0.9",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0",
+  "psycopg2-binary>=2.9",
+  "python-dotenv>=1.0",
 ]
 
 [project.scripts]
@@ -19,6 +23,7 @@ chd-run-monitor = "eventtrace.run_monitor:main"
 chd-api = "eventtrace.api:main"
 chd-bot = "eventtrace.telegram_bot:main"
 chd-scrape-vc = "eventtrace.causelist_scraper:main"
+chd-scrape-causelist = "eventtrace.causelist_parser:main"
 
 court-display-init-session = "eventtrace.init_session:main"
 court-display-run-monitor = "eventtrace.run_monitor:main"
