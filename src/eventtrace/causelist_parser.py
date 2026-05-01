@@ -491,7 +491,7 @@ def main() -> None:
     for court in parsed:
         b = court["bench"]
         print(
-            f"  Court {b['court_no']:>4}  {len(court['cases']):>4} cases"
+            f"  Court {str(b['court_no'] or '?'):>4}  {len(court['cases']):>4} cases"
             f"  {'NOT SITTING' if b['not_sitting'] else 'sitting':12}"
             f"  judges: {', '.join(b['judges'][:2])}"
         )
