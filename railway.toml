@@ -1,8 +1,15 @@
+# ── API service (default) ────────────────────────────────────────────────────
+# Backfills last 7 days of causelist on startup, then serves the API.
 [build]
 builder = "dockerfile"
 
 [deploy]
-startCommand = "chd-api"
+startCommand = "scripts/start-api.sh"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicy = { type = "on-failure", maxRetries = 3 }
+
+# ── Other services — add in Railway dashboard with these start commands ──────
+# Monitor (display board scraper):   scripts/start-monitor.sh
+# Causelist scheduler:               scripts/start-scheduler.sh
+# Telegram bot:                      chd-bot
