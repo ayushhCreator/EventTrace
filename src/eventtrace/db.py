@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator
+
+log = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -761,8 +765,17 @@ class PostgresDB:
 
     def _get_pool(self):
         if self._pool is None:
+            import psycopg2  # type: ignore[import]
             import psycopg2.pool  # type: ignore[import]
-            self._pool = psycopg2.pool.ThreadedConnectionPool(1, 5, self._dsn)
+            for attempt in range(10):
+                try:
+                    self._pool = psycopg2.pool.ThreadedConnectionPool(1, 5, self._dsn)
+                    return self._pool
+                except psycopg2.OperationalError as exc:
+                    if attempt == 9:
+                        raise
+                    log.warning("Postgres not ready (attempt %d/10): %s — retrying in 3s", attempt + 1, exc)
+                    time.sleep(3)
         return self._pool
 
     @contextmanager
