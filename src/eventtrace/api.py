@@ -58,11 +58,10 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="CHD EventTrace", version="0.2.0")
 
-    _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_cors_origins,
-        allow_credentials=_cors_origins != ["*"],
+        allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
