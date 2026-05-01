@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright
 
 from .config import Settings
 
