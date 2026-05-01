@@ -14,5 +14,5 @@ RUN pip install --no-cache-dir -e . \
 ENV CHD_API_HOST=0.0.0.0
 ENV CHD_API_PORT=8009
 
-EXPOSE 8009
+EXPOSE $PORT
 CMD ["chd-api"]

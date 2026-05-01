@@ -312,7 +312,7 @@ def main() -> None:
     import uvicorn
 
     host = os.getenv("CHD_API_HOST", "127.0.0.1")
-    port = int(os.getenv("CHD_API_PORT", "8009"))
+    port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
     reload_enabled = reload_env in {"1", "true", "yes", "on"}
     uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=reload_enabled)
