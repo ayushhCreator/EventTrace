@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -761,22 +762,26 @@ class PostgresDB:
 
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
-        self._pool = None  # lazy — created on first use
+        self._pool = None
+        self._pool_lock = threading.Lock()
 
     def _get_pool(self):
-        if self._pool is None:
+        if self._pool is not None:
+            return self._pool
+        with self._pool_lock:
+            if self._pool is not None:
+                return self._pool
             import psycopg2  # type: ignore[import]
             import psycopg2.pool  # type: ignore[import]
-            for attempt in range(10):
+            for attempt in range(9):
                 try:
                     self._pool = psycopg2.pool.ThreadedConnectionPool(1, 5, self._dsn)
                     return self._pool
                 except psycopg2.OperationalError as exc:
-                    if attempt == 9:
-                        raise
-                    log.warning("Postgres not ready (attempt %d/10): %s — retrying in 3s", attempt + 1, exc)
+                    log.warning("Postgres not ready (attempt %d/9): %s — retrying in 3s", attempt + 1, exc)
                     time.sleep(3)
-        return self._pool
+            self._pool = psycopg2.pool.ThreadedConnectionPool(1, 5, self._dsn)
+            return self._pool
 
     @contextmanager
     def _cursor(self) -> Generator:
