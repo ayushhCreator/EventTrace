@@ -5,5 +5,4 @@ builder = "dockerfile"
 startCommand = "chd-api"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
-restartPolicyType = "on-failure"
-restartPolicyMaxRetries = 3
+restartPolicy = { type = "on-failure", maxRetries = 3 }
