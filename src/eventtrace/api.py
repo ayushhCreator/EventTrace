@@ -75,10 +75,7 @@ def create_app() -> FastAPI:
 
     @app.get("/vc-links/dates")
     def vc_link_dates() -> list[str]:
-        """All dates that have scraped cause list data, descending."""
-        with db.connect() as con:
-            rows = con.execute("SELECT DISTINCT date FROM vc_zoom_link ORDER BY date DESC").fetchall()
-        return [r[0] for r in rows]
+        return db.list_vc_dates()
 
     # ── Event traces ─────────────────────────────────────────────────────────
 

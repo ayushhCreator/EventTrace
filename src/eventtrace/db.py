@@ -421,6 +421,13 @@ class DB:
             ).fetchall()
         return {r["room_no"]: r["zoom_url"] for r in rows}
 
+    def list_vc_dates(self) -> list[str]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT DISTINCT date FROM vc_zoom_link ORDER BY date DESC"
+            ).fetchall()
+        return [r["date"] for r in rows]
+
     # ── Subscriptions ────────────────────────────────────────────────────────
 
     def add_subscription(
@@ -1092,6 +1099,11 @@ class PostgresDB:
         with self._cursor() as cur:
             cur.execute("SELECT room_no, zoom_url FROM vc_zoom_link WHERE date=%s", (date,))
             return {r["room_no"]: r["zoom_url"] for r in cur.fetchall()}
+
+    def list_vc_dates(self) -> list[str]:
+        with self._cursor() as cur:
+            cur.execute("SELECT DISTINCT date FROM vc_zoom_link ORDER BY date DESC")
+            return [r["date"] for r in cur.fetchall()]
 
     # ── Subscriptions ────────────────────────────────────────────────────────
 
