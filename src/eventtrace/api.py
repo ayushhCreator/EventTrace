@@ -397,6 +397,8 @@ def create_app() -> FastAPI:
         existing = db.get_latest_otp(phone)
         if existing:
             exp = existing["expires_at"]
+            if isinstance(exp, str):
+                exp = datetime.fromisoformat(exp.replace("Z", "+00:00"))
             if hasattr(exp, "tzinfo") and exp.tzinfo is None:
                 exp = exp.replace(tzinfo=timezone.utc)
             remaining_window = (exp - datetime.now(timezone.utc)).total_seconds()
@@ -408,7 +410,8 @@ def create_app() -> FastAPI:
         db.upsert_user(phone, name=req.name)
         db.save_otp(phone, otp_hash, expires_at)
         _send_otp_msg91(phone, otp, settings)
-        return {"detail": "OTP sent", "expires_in": OTP_EXPIRE_MINUTES * 60}
+        dev = not settings.msg91_auth_key
+        return {"detail": "OTP sent", "expires_in": OTP_EXPIRE_MINUTES * 60, **({"dev_otp": otp} if dev else {})}
 
     @app.post("/auth/verify-otp")
     def verify_otp(req: VerifyOTPRequest) -> dict:
@@ -417,6 +420,8 @@ def create_app() -> FastAPI:
         if not record:
             raise HTTPException(status_code=400, detail="No OTP found — request a new one")
         exp = record["expires_at"]
+        if isinstance(exp, str):
+            exp = datetime.fromisoformat(exp.replace("Z", "+00:00"))
         if hasattr(exp, "tzinfo") and exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) > exp:

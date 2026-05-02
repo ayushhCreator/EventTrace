@@ -1483,8 +1483,7 @@ class PostgresDB:
             row = cur.fetchone()
             if not row:
                 return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return dict(row)
 
     def get_user_by_id(self, user_id: str) -> dict | None:
         with self._cursor() as cur:
@@ -1495,11 +1494,9 @@ class PostgresDB:
             row = cur.fetchone()
             if not row:
                 return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return dict(row)
 
     def upsert_user(self, phone: str, name: str | None = None, email: str | None = None) -> dict:
-        """Create user if not exists, return user row."""
         with self._cursor() as cur:
             cur.execute(
                 """
@@ -1512,9 +1509,7 @@ class PostgresDB:
                 """,
                 (phone, name, email),
             )
-            row = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return dict(cur.fetchone())
 
     def mark_user_verified(self, phone: str) -> None:
         with self._cursor() as cur:
@@ -1542,8 +1537,7 @@ class PostgresDB:
             row = cur.fetchone()
             if not row:
                 return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return dict(row)
 
     def increment_otp_attempts(self, otp_id: int) -> None:
         with self._cursor() as cur:
@@ -1568,8 +1562,7 @@ class PostgresDB:
             row = cur.fetchone()
             if not row:
                 return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return dict(row)
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
