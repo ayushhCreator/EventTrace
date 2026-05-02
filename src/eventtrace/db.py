@@ -920,6 +920,37 @@ class PostgresDB:
             "CREATE INDEX IF NOT EXISTS idx_causelist_case_date_court ON causelist_case(list_date, court_no)",
             "CREATE INDEX IF NOT EXISTS idx_causelist_case_type_year ON causelist_case(case_type, case_year)",
             "CREATE INDEX IF NOT EXISTS idx_causelist_case_advocate ON causelist_case(advocate)",
+            # ── Auth / subscription model ────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS profiles (
+              id          TEXT PRIMARY KEY,
+              email       TEXT,
+              display_name TEXT,
+              role        TEXT NOT NULL DEFAULT 'client',
+              tier        TEXT NOT NULL DEFAULT 'free',
+              phone       TEXT,
+              created_at  TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS tracked_cases (
+              id              SERIAL PRIMARY KEY,
+              user_id         TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+              case_ref        TEXT NOT NULL,
+              case_type       TEXT,
+              case_number     TEXT,
+              case_year       INTEGER,
+              petitioner      TEXT,
+              respondent      TEXT,
+              notes           TEXT,
+              notify_whatsapp INTEGER NOT NULL DEFAULT 0,
+              notify_email    INTEGER NOT NULL DEFAULT 1,
+              created_at      TEXT NOT NULL,
+              UNIQUE(user_id, case_ref)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref)",
         ]
         with self._cursor() as cur:
             # Try to enable trigram extension — non-fatal if superuser not available

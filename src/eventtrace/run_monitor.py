@@ -81,33 +81,49 @@ def _aggregate_rows(
 
 # ── VC Scrape scheduler ──────────────────────────────────────────────────────
 # Scrape windows (IST hour, inclusive): 0, 6, 8, 20
-# Each date is scraped at most once per window; stores {date_str: set_of_hours_done}
+# Each date is scraped at most once per window; state persisted to monitor_state
+# so restarts don't re-launch Playwright for already-scraped windows (fix B3).
 _vc_scrape_lock = threading.Lock()
-_vc_scraped: dict[str, set[int]] = {}  # {"2026-04-23": {0, 6, 8}}
+_vc_scraped: dict[str, set[int]] = {}  # in-memory cache; populated from DB on first use
 
 _VC_WINDOWS = [0, 6, 8, 20]  # IST hours that trigger a scrape
+_VC_STATE_PREFIX = "vc_scraped:"  # monitor_state key prefix
 
 
-def _should_scrape_vc(for_date: date, current_ist_hour: int) -> bool:
+def _vc_load_from_db(date_str: str, db: Any) -> set[int]:
+    raw = db.get_monitor_state(f"{_VC_STATE_PREFIX}{date_str}")
+    if not raw:
+        return set()
+    try:
+        return {int(h) for h in raw.split(",") if h.strip()}
+    except ValueError:
+        return set()
+
+
+def _should_scrape_vc(for_date: date, current_ist_hour: int, db: Any) -> bool:
     date_str = for_date.isoformat()
     past_windows = [h for h in _VC_WINDOWS if h <= current_ist_hour]
     if not past_windows:
         return False
     with _vc_scrape_lock:
-        done = _vc_scraped.get(date_str, set())
+        if date_str not in _vc_scraped:
+            _vc_scraped[date_str] = _vc_load_from_db(date_str, db)
+        done = _vc_scraped[date_str]
         return bool(set(past_windows) - done)
 
 
-def _mark_vc_scraped(for_date: date, window_hour: int) -> None:
+def _mark_vc_scraped(for_date: date, window_hour: int, db: Any) -> None:
     date_str = for_date.isoformat()
     with _vc_scrape_lock:
         _vc_scraped.setdefault(date_str, set()).add(window_hour)
+        serialized = ",".join(str(h) for h in sorted(_vc_scraped[date_str]))
+    db.set_monitor_state(f"{_VC_STATE_PREFIX}{date_str}", serialized)
 
 
 def _run_vc_scrape(for_date: date, window_hour: int, settings: Settings, db: Any) -> None:
     try:
         links = scrape_and_store_vc_links(for_date, settings, db)
-        _mark_vc_scraped(for_date, window_hour)
+        _mark_vc_scraped(for_date, window_hour, db)
         log.info("VC scrape for %s (window %02d:00): %d links", for_date, window_hour, len(links))
     except Exception as exc:
         log.warning("VC scrape failed for %s: %s", for_date, exc)
@@ -124,12 +140,12 @@ def _vc_scheduler_thread(settings: Settings, db: Any) -> None:
 
             # Scrape today's links at windows 0, 6, 8
             for w in [0, 6, 8]:
-                if hour >= w and _should_scrape_vc(today, w):
+                if hour >= w and _should_scrape_vc(today, w, db):
                     _run_vc_scrape(today, w, settings, db)
                     break  # one scrape per wake-up is enough
 
             # At 14:00+ IST scrape tomorrow's links (cause list usually published by afternoon)
-            if hour >= 14 and _should_scrape_vc(tomorrow, 14):
+            if hour >= 14 and _should_scrape_vc(tomorrow, 14, db):
                 _run_vc_scrape(tomorrow, 14, settings, db)
 
         except Exception as exc:
