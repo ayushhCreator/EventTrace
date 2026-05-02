@@ -951,6 +951,32 @@ class PostgresDB:
             """,
             "CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref)",
+            # ── Phone-OTP auth ────────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS users (
+              id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              phone       TEXT NOT NULL UNIQUE,
+              email       TEXT,
+              name        TEXT,
+              role        TEXT NOT NULL DEFAULT 'client',
+              tier        TEXT NOT NULL DEFAULT 'free',
+              verified    INTEGER NOT NULL DEFAULT 0,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)",
+            """
+            CREATE TABLE IF NOT EXISTS phone_otps (
+              id          SERIAL PRIMARY KEY,
+              phone       TEXT NOT NULL,
+              otp_hash    TEXT NOT NULL,
+              expires_at  TIMESTAMPTZ NOT NULL,
+              attempts    INTEGER NOT NULL DEFAULT 0,
+              used        INTEGER NOT NULL DEFAULT 0,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_phone_otps_phone ON phone_otps(phone)",
         ]
         with self._cursor() as cur:
             # Try to enable trigram extension — non-fatal if superuser not available
@@ -1445,6 +1471,105 @@ class PostgresDB:
                     )
                     total += 1
         return total
+
+    # ── Auth helpers ──────────────────────────────────────────────────────────
+
+    def get_user_by_phone(self, phone: str) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT id, phone, email, name, role, tier, verified FROM users WHERE phone = %s",
+                (phone,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT id, phone, email, name, role, tier, verified FROM users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+    def upsert_user(self, phone: str, name: str | None = None, email: str | None = None) -> dict:
+        """Create user if not exists, return user row."""
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (phone, name, email, verified)
+                VALUES (%s, %s, %s, 0)
+                ON CONFLICT (phone) DO UPDATE SET
+                  name  = COALESCE(EXCLUDED.name, users.name),
+                  email = COALESCE(EXCLUDED.email, users.email)
+                RETURNING id, phone, email, name, role, tier, verified
+                """,
+                (phone, name, email),
+            )
+            row = cur.fetchone()
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+    def mark_user_verified(self, phone: str) -> None:
+        with self._cursor() as cur:
+            cur.execute("UPDATE users SET verified = 1 WHERE phone = %s", (phone,))
+
+    def save_otp(self, phone: str, otp_hash: str, expires_at: Any) -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO phone_otps (phone, otp_hash, expires_at) VALUES (%s, %s, %s)",
+                (phone, otp_hash, expires_at),
+            )
+
+    def get_latest_otp(self, phone: str) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, phone, otp_hash, expires_at, attempts, used
+                FROM phone_otps
+                WHERE phone = %s AND used = 0
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (phone,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+    def increment_otp_attempts(self, otp_id: int) -> None:
+        with self._cursor() as cur:
+            cur.execute("UPDATE phone_otps SET attempts = attempts + 1 WHERE id = %s", (otp_id,))
+
+    def mark_otp_used(self, otp_id: int) -> None:
+        with self._cursor() as cur:
+            cur.execute("UPDATE phone_otps SET used = 1 WHERE id = %s", (otp_id,))
+
+    def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE users SET
+                  name  = COALESCE(%s, name),
+                  email = COALESCE(%s, email)
+                WHERE id = %s
+                RETURNING id, phone, email, name, role, tier, verified
+                """,
+                (name, email, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────

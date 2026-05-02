@@ -72,3 +72,8 @@ class Settings:
         self.database_url = _get_env("DATABASE_URL", "") or None
         # Telegram chat ID for admin alerts (causelist scrape failures etc.)
         self.admin_chat_id = _get_env("ADMIN_CHAT_ID", "") or None
+        # MSG91 — OTP delivery
+        self.msg91_auth_key = _get_env("MSG91_AUTH_KEY", "")
+        self.msg91_template_id = _get_env("MSG91_TEMPLATE_ID", "")
+        # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
+        self.jwt_secret = _get_env("JWT_SECRET", "change-me-in-production")

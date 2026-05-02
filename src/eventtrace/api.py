@@ -8,18 +8,104 @@ import io
 import logging
 import os
 import re
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+import httpx
+import jwt
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .config import Settings
 from .db import get_db
 
 _UI_DIR = Path(__file__).parent / "ui"
+_log = logging.getLogger(__name__)
+_bearer = HTTPBearer(auto_error=False)
+
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 30
+OTP_EXPIRE_MINUTES = 10
+OTP_MAX_ATTEMPTS = 5
+
+
+# ── Auth models ───────────────────────────────────────────────────────────────
+
+class SendOTPRequest(BaseModel):
+    phone: str          # E.164 e.g. "+919876543210"
+    name: str | None = None
+
+class VerifyOTPRequest(BaseModel):
+    phone: str
+    otp: str
+
+class UpdateProfileRequest(BaseModel):
+    name: str | None = None
+    email: str | None = None
+
+
+# ── JWT helpers ───────────────────────────────────────────────────────────────
+
+def _issue_jwt(user_id: str, settings: Settings) -> str:
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALGORITHM)
+
+
+def _decode_jwt(token: str, settings: Settings) -> dict:
+    try:
+        return jwt.decode(token, settings.jwt_secret, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+# ── OTP helpers ───────────────────────────────────────────────────────────────
+
+def _hash_otp(otp: str) -> str:
+    return hashlib.sha256(otp.encode()).hexdigest()
+
+
+def _send_otp_msg91(phone: str, otp: str, settings: Settings) -> None:
+    """Send OTP via MSG91. Raises on HTTP error."""
+    if not settings.msg91_auth_key:
+        _log.warning("MSG91_AUTH_KEY not set — OTP not sent (dev mode, OTP logged)")
+        _log.info("DEV OTP for %s: %s", phone, otp)
+        return
+    # Remove leading + for MSG91
+    mobile = phone.lstrip("+")
+    payload = {
+        "template_id": settings.msg91_template_id,
+        "mobile": mobile,
+        "authkey": settings.msg91_auth_key,
+        "otp": otp,
+    }
+    resp = httpx.post(
+        "https://api.msg91.com/api/v5/otp",
+        json=payload,
+        timeout=10,
+    )
+    if resp.status_code >= 400:
+        _log.error("MSG91 error %s: %s", resp.status_code, resp.text)
+        raise HTTPException(status_code=502, detail="OTP delivery failed — try again")
+
+
+def _normalize_phone(phone: str) -> str:
+    """Strip spaces/dashes, ensure +91 prefix for Indian numbers."""
+    phone = re.sub(r"[\s\-()]", "", phone)
+    if not phone.startswith("+"):
+        phone = "+91" + phone
+    if not re.match(r"^\+\d{10,15}$", phone):
+        raise HTTPException(status_code=422, detail="Invalid phone number")
+    return phone
 
 
 class AlertRequest(BaseModel):
@@ -292,6 +378,70 @@ def create_app() -> FastAPI:
         if not row:
             raise HTTPException(status_code=404, detail="Case not found")
         return row
+
+    # ── Auth endpoints ────────────────────────────────────────────────────────
+
+    def _current_user(credentials: HTTPAuthorizationCredentials | None = Security(_bearer)) -> dict:
+        if not credentials:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        payload = _decode_jwt(credentials.credentials, settings)
+        user = db.get_user_by_id(payload["sub"])
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+
+    @app.post("/auth/send-otp")
+    def send_otp(req: SendOTPRequest) -> dict:
+        phone = _normalize_phone(req.phone)
+        # Rate limit: check if a valid unused OTP was issued in the last 60s
+        existing = db.get_latest_otp(phone)
+        if existing:
+            exp = existing["expires_at"]
+            if hasattr(exp, "tzinfo") and exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            remaining_window = (exp - datetime.now(timezone.utc)).total_seconds()
+            if remaining_window > (OTP_EXPIRE_MINUTES * 60 - 60):
+                raise HTTPException(status_code=429, detail="OTP already sent — wait 60 seconds")
+        otp = str(secrets.randbelow(900000) + 100000)   # 6-digit
+        otp_hash = _hash_otp(otp)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES)
+        db.upsert_user(phone, name=req.name)
+        db.save_otp(phone, otp_hash, expires_at)
+        _send_otp_msg91(phone, otp, settings)
+        return {"detail": "OTP sent", "expires_in": OTP_EXPIRE_MINUTES * 60}
+
+    @app.post("/auth/verify-otp")
+    def verify_otp(req: VerifyOTPRequest) -> dict:
+        phone = _normalize_phone(req.phone)
+        record = db.get_latest_otp(phone)
+        if not record:
+            raise HTTPException(status_code=400, detail="No OTP found — request a new one")
+        exp = record["expires_at"]
+        if hasattr(exp, "tzinfo") and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > exp:
+            raise HTTPException(status_code=400, detail="OTP expired")
+        if record["attempts"] >= OTP_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Too many attempts — request a new OTP")
+        db.increment_otp_attempts(record["id"])
+        if _hash_otp(req.otp) != record["otp_hash"]:
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+        db.mark_otp_used(record["id"])
+        db.mark_user_verified(phone)
+        user = db.get_user_by_phone(phone)
+        token = _issue_jwt(str(user["id"]), settings)
+        return {"token": token, "user": user}
+
+    @app.get("/auth/me")
+    def get_me(current_user: dict = Depends(_current_user)) -> dict:
+        return current_user
+
+    @app.patch("/auth/me")
+    def update_me(body: UpdateProfileRequest, current_user: dict = Depends(_current_user)) -> dict:
+        updated = db.update_user_profile(current_user["id"], body.name, body.email)
+        if not updated:
+            raise HTTPException(status_code=404, detail="User not found")
+        return updated
 
     # ── UI pages ─────────────────────────────────────────────────────────────
 
