@@ -18,6 +18,12 @@ def causelist_dates(db: Any = Depends(get_db)) -> list[str]:
     return db.list_causelist_dates()
 
 
+@router.get("/prefixes")
+def causelist_prefixes(db: Any = Depends(get_db)) -> list[str]:
+    """Distinct case-ref prefixes (MAT, FMA, CPAN …) from stored causelist data."""
+    return db.list_causelist_prefixes()
+
+
 @router.get("/search")
 def causelist_search(
     case_ref: str | None = Query(None),

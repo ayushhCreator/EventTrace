@@ -121,6 +121,18 @@ class SQLiteCauselistRepository:
             ).fetchall()
         return [r["list_date"] for r in rows]
 
+    def list_causelist_prefixes(self) -> list[str]:
+        with self._connect() as con:
+            rows = con.execute(
+                """
+                SELECT DISTINCT substr(case_ref, 1, instr(case_ref, '/') - 1) AS prefix
+                FROM causelist_case
+                WHERE case_ref LIKE '%/%'
+                ORDER BY prefix
+                """
+            ).fetchall()
+        return [r["prefix"] for r in rows if r["prefix"]]
+
     def store_causelist(
         self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None
     ) -> int:
@@ -299,6 +311,18 @@ class PostgresCauselistRepository:
         with self._cursor() as cur:
             cur.execute("SELECT DISTINCT list_date FROM causelist_bench ORDER BY list_date DESC")
             return [r["list_date"] for r in cur.fetchall()]
+
+    def list_causelist_prefixes(self) -> list[str]:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT split_part(case_ref, '/', 1) AS prefix
+                FROM causelist_case
+                WHERE case_ref LIKE '%/%'
+                ORDER BY prefix
+                """
+            )
+            return [r["prefix"] for r in cur.fetchall() if r["prefix"]]
 
     def store_causelist(
         self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None

@@ -334,6 +334,9 @@ class DB:
     def list_causelist_dates(self) -> list[str]:
         return self._causelist.list_causelist_dates()
 
+    def list_causelist_prefixes(self) -> list[str]:
+        return self._causelist.list_causelist_prefixes()
+
     def store_causelist(self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None) -> int:
         return self._causelist.store_causelist(parsed, scraped_at)
 
