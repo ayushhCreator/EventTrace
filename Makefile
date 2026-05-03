@@ -1,4 +1,4 @@
-.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape scheduler
+.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape scheduler test
 
 # ── Local Postgres ────────────────────────────────────────────────────────────
 
@@ -43,3 +43,6 @@ scrape:
 
 scheduler:
 	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/chd-schedule-causelist
+
+test:
+	@python -m unittest discover -s tests -q

@@ -50,6 +50,12 @@ source .venv/bin/activate
 chd-api
 ```
 
+## Tests
+
+```bash
+make test
+```
+
 ---
 
 ## Systemd services (auto-start on boot)

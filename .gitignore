@@ -22,3 +22,7 @@ test-results/
 
 scratch/
 DEPLOY.md
+
+graphify-out/
+logs/
+*.log
