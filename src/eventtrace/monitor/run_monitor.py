@@ -383,6 +383,19 @@ def _dispatch_notifications(
 
 # ── Main loop ────────────────────────────────────────────────────────────────
 
+def _start_api_thread(settings: Settings) -> None:
+    """Start the FastAPI server in a background thread (dev convenience)."""
+    import os
+    import uvicorn
+    host = os.getenv("CHD_API_HOST", "127.0.0.1")
+    port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
+    reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
+    reload_flag = reload_env in {"1", "true", "yes", "on"}
+    log.info("Starting API on %s:%d (reload=%s)", host, port, reload_flag)
+    # reload=True requires main thread — run without reload when embedded
+    uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=False)
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -398,6 +411,12 @@ def main() -> None:
     db_label = settings.database_url or settings.db_path
     print(f"DB: {db_label}")
     print(f"Poll seconds: {settings.poll_seconds}")
+
+    # Optionally start API in background thread (set CHD_WITH_API=1)
+    import os
+    if os.getenv("CHD_WITH_API", "0").strip() in {"1", "true", "yes"}:
+        api_thread = threading.Thread(target=_start_api_thread, args=(settings,), daemon=True, name="api")
+        api_thread.start()
 
     # Start VC scrape scheduler in background
     vc_thread = threading.Thread(
