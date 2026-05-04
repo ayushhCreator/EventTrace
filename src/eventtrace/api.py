@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,11 +23,13 @@ from .routes.webhooks import router as webhooks_router
 def create_app() -> FastAPI:
     settings = Settings()
     db = get_db(settings)
-    db.ensure_schema()
 
     app = FastAPI(title="CHD EventTrace", version="0.2.0")
     app.state.settings = settings
     app.state.db = db
+
+    # Run schema migrations in background so /health responds immediately on startup.
+    threading.Thread(target=db.ensure_schema, daemon=True, name="ensure-schema").start()
 
     _extra = [o.strip() for o in os.getenv("CHD_CORS_ORIGINS", "").split(",") if o.strip()]
     _origins = [
