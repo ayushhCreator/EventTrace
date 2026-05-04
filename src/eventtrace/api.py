@@ -28,10 +28,17 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.db = db
 
+    _extra = [o.strip() for o in os.getenv("CHD_CORS_ORIGINS", "").split(",") if o.strip()]
+    _origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://eventtrace.vercel.app",
+        *_extra,
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
+        allow_origins=_origins,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )

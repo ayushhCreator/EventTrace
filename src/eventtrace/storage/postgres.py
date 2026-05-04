@@ -252,6 +252,25 @@ class PostgresDB:
                 except Exception:
                     pass
 
+            # Non-destructive column migrations for tracked_cases (safe to re-run)
+            for _col in [
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS court_no TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS bench_label TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS judges_json TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS list_date TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS serial_no INTEGER",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS petitioner TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS respondent TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_active INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_serial INTEGER",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS look_ahead INTEGER NOT NULL DEFAULT 5",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS added_at TEXT NOT NULL DEFAULT NOW()::TEXT",
+            ]:
+                try:
+                    cur.execute(_col)
+                except Exception:
+                    pass
+
     # ── Events delegation ────────────────────────────────────────────────────
 
     def upsert_current_state(self, court_id: str, row: dict[str, Any], seen_time: datetime) -> None:
