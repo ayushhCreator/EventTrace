@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://eventtrace.vercel.app",
+        "https://event-trace-web.vercel.app",
         *_extra,
     ]
     app.add_middleware(
