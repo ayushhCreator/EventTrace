@@ -60,7 +60,9 @@ def create_app() -> FastAPI:
 def main() -> None:
     import uvicorn
 
-    host = os.getenv("CHD_API_HOST", "127.0.0.1")
+    # Default 0.0.0.0 so Railway/Docker healthchecks can reach the process.
+    # Override with CHD_API_HOST=127.0.0.1 locally if needed.
+    host = os.getenv("CHD_API_HOST", "0.0.0.0")
     port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
     reload_enabled = reload_env in {"1", "true", "yes", "on"}

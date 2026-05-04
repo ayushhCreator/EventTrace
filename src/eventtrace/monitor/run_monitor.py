@@ -387,7 +387,7 @@ def _start_api_thread(settings: Settings) -> None:
     """Start the FastAPI server in a background thread (dev convenience)."""
     import os
     import uvicorn
-    host = os.getenv("CHD_API_HOST", "127.0.0.1")
+    host = os.getenv("CHD_API_HOST", "0.0.0.0")
     port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
     reload_flag = reload_env in {"1", "true", "yes", "on"}
