@@ -196,6 +196,30 @@ class DB:
                 """
             )
 
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS tracked_cases (
+                  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  case_ref     TEXT NOT NULL,
+                  court_no     TEXT,
+                  bench_label  TEXT,
+                  judges_json  TEXT,
+                  list_date    TEXT,
+                  serial_no    INTEGER,
+                  petitioner   TEXT,
+                  respondent   TEXT,
+                  alert_active INTEGER NOT NULL DEFAULT 0,
+                  alert_serial INTEGER,
+                  look_ahead   INTEGER NOT NULL DEFAULT 5,
+                  added_at     TEXT NOT NULL,
+                  UNIQUE(user_id, case_ref)
+                );
+                CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id);
+                CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref);
+                """
+            )
+
             # Non-destructive column migrations — safe to re-run
             for _col_sql in [
                 "ALTER TABLE subscriptions ADD COLUMN hearing_date TEXT",
@@ -368,3 +392,86 @@ class DB:
 
     def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
         return self._auth.update_user_profile(user_id, name, email)
+
+    # ── Tracked cases ────────────────────────────────────────────────────────
+
+    def add_tracked_case(self, user_id: str, case_ref: str, **kwargs: Any) -> int:
+        now = datetime.utcnow().isoformat()
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO tracked_cases
+                  (user_id, case_ref, court_no, bench_label, judges_json,
+                   list_date, serial_no, petitioner, respondent, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, case_ref) DO UPDATE SET
+                  court_no    = excluded.court_no,
+                  bench_label = excluded.bench_label,
+                  judges_json = excluded.judges_json,
+                  list_date   = excluded.list_date,
+                  serial_no   = excluded.serial_no,
+                  petitioner  = excluded.petitioner,
+                  respondent  = excluded.respondent
+                """,
+                (
+                    user_id,
+                    case_ref,
+                    kwargs.get("court_no"),
+                    kwargs.get("bench_label"),
+                    kwargs.get("judges_json"),
+                    kwargs.get("list_date"),
+                    kwargs.get("serial_no"),
+                    kwargs.get("petitioner"),
+                    kwargs.get("respondent"),
+                    now,
+                ),
+            )
+            row = con.execute(
+                "SELECT id FROM tracked_cases WHERE user_id=? AND case_ref=?",
+                (user_id, case_ref),
+            ).fetchone()
+            return int(row["id"])
+
+    def list_tracked_cases(self, user_id: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT * FROM tracked_cases WHERE user_id=? ORDER BY added_at DESC",
+                (user_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_tracked_case(self, user_id: str, case_ref: str) -> dict | None:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT * FROM tracked_cases WHERE user_id=? AND case_ref=?",
+                (user_id, case_ref),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def remove_tracked_case(self, user_id: str, case_ref: str) -> bool:
+        with self.connect() as con:
+            cur = con.execute(
+                "DELETE FROM tracked_cases WHERE user_id=? AND case_ref=?",
+                (user_id, case_ref),
+            )
+            return cur.rowcount > 0
+
+    def set_case_alert(self, user_id: str, case_ref: str, alert_serial: int, look_ahead: int) -> bool:
+        with self.connect() as con:
+            cur = con.execute(
+                """
+                UPDATE tracked_cases
+                   SET alert_active=1, alert_serial=?, look_ahead=?
+                 WHERE user_id=? AND case_ref=?
+                """,
+                (alert_serial, look_ahead, user_id, case_ref),
+            )
+            return cur.rowcount > 0
+
+    def clear_case_alert(self, user_id: str, case_ref: str) -> bool:
+        with self.connect() as con:
+            cur = con.execute(
+                "UPDATE tracked_cases SET alert_active=0 WHERE user_id=? AND case_ref=?",
+                (user_id, case_ref),
+            )
+            return cur.rowcount > 0

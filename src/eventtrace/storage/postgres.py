@@ -186,30 +186,21 @@ class PostgresDB:
             "CREATE INDEX IF NOT EXISTS idx_causelist_case_advocate ON causelist_case(advocate)",
             # ── Auth / subscription model ────────────────────────────────────
             """
-            CREATE TABLE IF NOT EXISTS profiles (
-              id          TEXT PRIMARY KEY,
-              email       TEXT,
-              display_name TEXT,
-              role        TEXT NOT NULL DEFAULT 'client',
-              tier        TEXT NOT NULL DEFAULT 'free',
-              phone       TEXT,
-              created_at  TEXT NOT NULL
-            )
-            """,
-            """
             CREATE TABLE IF NOT EXISTS tracked_cases (
-              id              SERIAL PRIMARY KEY,
-              user_id         TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-              case_ref        TEXT NOT NULL,
-              case_type       TEXT,
-              case_number     TEXT,
-              case_year       INTEGER,
-              petitioner      TEXT,
-              respondent      TEXT,
-              notes           TEXT,
-              notify_whatsapp INTEGER NOT NULL DEFAULT 0,
-              notify_email    INTEGER NOT NULL DEFAULT 1,
-              created_at      TEXT NOT NULL,
+              id           SERIAL PRIMARY KEY,
+              user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              case_ref     TEXT NOT NULL,
+              court_no     TEXT,
+              bench_label  TEXT,
+              judges_json  TEXT,
+              list_date    TEXT,
+              serial_no    INTEGER,
+              petitioner   TEXT,
+              respondent   TEXT,
+              alert_active INTEGER NOT NULL DEFAULT 0,
+              alert_serial INTEGER,
+              look_ahead   INTEGER NOT NULL DEFAULT 5,
+              added_at     TEXT NOT NULL,
               UNIQUE(user_id, case_ref)
             )
             """,
@@ -418,3 +409,85 @@ class PostgresDB:
 
     def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
         return self._auth.update_user_profile(user_id, name, email)
+
+    # ── Tracked cases ────────────────────────────────────────────────────────
+
+    def add_tracked_case(self, user_id: str, case_ref: str, **kwargs: Any) -> int:
+        now = datetime.utcnow().isoformat()
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO tracked_cases
+                  (user_id, case_ref, court_no, bench_label, judges_json,
+                   list_date, serial_no, petitioner, respondent, added_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, case_ref) DO UPDATE SET
+                  court_no    = EXCLUDED.court_no,
+                  bench_label = EXCLUDED.bench_label,
+                  judges_json = EXCLUDED.judges_json,
+                  list_date   = EXCLUDED.list_date,
+                  serial_no   = EXCLUDED.serial_no,
+                  petitioner  = EXCLUDED.petitioner,
+                  respondent  = EXCLUDED.respondent
+                RETURNING id
+                """,
+                (
+                    user_id,
+                    case_ref,
+                    kwargs.get("court_no"),
+                    kwargs.get("bench_label"),
+                    kwargs.get("judges_json"),
+                    kwargs.get("list_date"),
+                    kwargs.get("serial_no"),
+                    kwargs.get("petitioner"),
+                    kwargs.get("respondent"),
+                    now,
+                ),
+            )
+            row = cur.fetchone()
+            return int(row["id"])
+
+    def list_tracked_cases(self, user_id: str) -> list[dict]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM tracked_cases WHERE user_id=%s ORDER BY added_at DESC",
+                (user_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_tracked_case(self, user_id: str, case_ref: str) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM tracked_cases WHERE user_id=%s AND case_ref=%s",
+                (user_id, case_ref),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def remove_tracked_case(self, user_id: str, case_ref: str) -> bool:
+        with self._cursor() as cur:
+            cur.execute(
+                "DELETE FROM tracked_cases WHERE user_id=%s AND case_ref=%s",
+                (user_id, case_ref),
+            )
+            return cur.rowcount > 0
+
+    def set_case_alert(self, user_id: str, case_ref: str, alert_serial: int, look_ahead: int) -> bool:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tracked_cases
+                   SET alert_active=1, alert_serial=%s, look_ahead=%s
+                 WHERE user_id=%s AND case_ref=%s
+                """,
+                (alert_serial, look_ahead, user_id, case_ref),
+            )
+            return cur.rowcount > 0
+
+    def clear_case_alert(self, user_id: str, case_ref: str) -> bool:
+        with self._cursor() as cur:
+            cur.execute(
+                "UPDATE tracked_cases SET alert_active=0 WHERE user_id=%s AND case_ref=%s",
+                (user_id, case_ref),
+            )
+            return cur.rowcount > 0
