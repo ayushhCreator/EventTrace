@@ -188,7 +188,7 @@ class PostgresDB:
             """
             CREATE TABLE IF NOT EXISTS tracked_cases (
               id           SERIAL PRIMARY KEY,
-              user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              user_id      UUID NOT NULL,
               case_ref     TEXT NOT NULL,
               court_no     TEXT,
               bench_label  TEXT,
@@ -270,6 +270,13 @@ class PostgresDB:
                     cur.execute(_col)
                 except Exception:
                     pass
+
+            # Drop stale FK to profiles (if still present on old DBs). No FK re-added:
+            # user_id is TEXT on old tables, UUID on new — JWT auth enforces ownership.
+            try:
+                cur.execute("ALTER TABLE tracked_cases DROP CONSTRAINT IF EXISTS tracked_cases_user_id_fkey")
+            except Exception:
+                pass
 
     # ── Events delegation ────────────────────────────────────────────────────
 
@@ -438,8 +445,9 @@ class PostgresDB:
                 """
                 INSERT INTO tracked_cases
                   (user_id, case_ref, court_no, bench_label, judges_json,
-                   list_date, serial_no, petitioner, respondent, added_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   list_date, serial_no, petitioner, respondent, added_at,
+                   created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (user_id, case_ref) DO UPDATE SET
                   court_no    = EXCLUDED.court_no,
                   bench_label = EXCLUDED.bench_label,
