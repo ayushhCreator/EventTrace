@@ -77,3 +77,8 @@ class Settings:
         self.msg91_template_id = _get_env("MSG91_TEMPLATE_ID", "")
         # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
         self.jwt_secret = _get_env("JWT_SECRET", "change-me-in-production")
+        if self.jwt_secret == "change-me-in-production" and self.msg91_auth_key:
+            raise RuntimeError(
+                "JWT_SECRET must be set in production (MSG91_AUTH_KEY is set but JWT_SECRET is default). "
+                "Run: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )

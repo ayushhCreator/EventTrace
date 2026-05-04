@@ -64,7 +64,7 @@ def send_otp_msg91(phone: str, otp: str, settings: Settings) -> None:
     """Send OTP via MSG91. Raises on HTTP error."""
     if not settings.msg91_auth_key:
         log.warning("MSG91_AUTH_KEY not set — OTP not sent (dev mode, OTP logged)")
-        log.info("DEV OTP for %s: %s", phone, otp)
+        log.warning("DEV OTP for %s: %s", phone, otp)
         return
     mobile = phone.lstrip("+")
     payload = {

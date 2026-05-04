@@ -16,10 +16,13 @@ python -m playwright install
 |------|---------|
 | Start monitor loop | `chd-run-monitor` |
 | Start API | `chd-api` |
+| Start causelist scheduler | `chd-schedule-causelist` |
 | Init session (only if JSON stops working) | `chd-init-session` |
-| Scrape causelist | `chd-scrape-causelist YYYY-MM-DD --store` |
+| Scrape causelist (one-shot) | `chd-scrape-causelist YYYY-MM-DD --store` |
 | Lint | `ruff check src/` |
 | Format | `ruff format src/` |
+
+Run all three together locally (3 terminals): `chd-api` + `chd-run-monitor` + `chd-schedule-causelist`.
 
 API runs at `http://127.0.0.1:8009` by default. Override with `CHD_API_HOST` / `CHD_API_PORT`.
 UI at `http://127.0.0.1:8009/ui`.
@@ -44,12 +47,13 @@ Two DB backends, same code:
 
 `get_db(settings)` in `db.py` picks the right one. All five processes use `get_db()`.
 
-Three independent processes share the DB:
+Four independent processes share the DB:
 
 ```
-init_session  →  .state/storage_state.json   (one-time manual CAPTCHA)
-run_monitor   →  scraper → change_detector → DB  (poll loop)
-api           →  DB reads only (FastAPI, read-only)
+init_session          →  .state/storage_state.json   (one-time manual CAPTCHA)
+run_monitor           →  scraper → change_detector → DB  (poll loop, ~15s)
+schedule_causelist    →  causelist PDF → causelist_case/bench tables (daily, 20:30–22:00 IST)
+api                   →  DB reads only (FastAPI, read-only)
 ```
 
 **Data flow in the monitor loop** (`run_monitor.py`):
@@ -66,6 +70,13 @@ api           →  DB reads only (FastAPI, read-only)
 - `GET /current-state` — all courts, latest data
 - `GET /event-traces` — change log (alias: `/changes`), filterable by `court_id`
 - `GET /field-state/{court_id}` — per-field history for one court
+- `GET /causelist/dates` — dates with stored cause lists
+- `GET /causelist/prefixes` — distinct case-ref type prefixes (MAT, FMA…)
+- `GET /causelist/search` — search cases by `case_ref`, `advocate`, `party`, `judge`, `date_from`, `date_to`
+- `GET /causelist/{YYYY-MM-DD}` — all benches for a date
+- `POST /auth/send-otp` — send OTP to phone (MSG91 in prod, logged in dev)
+- `POST /auth/verify-otp` — verify OTP, returns JWT
+- `GET /auth/me` — current user (requires Bearer token)
 
 ## Key design decisions
 
