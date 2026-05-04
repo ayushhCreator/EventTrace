@@ -71,7 +71,8 @@ def verify_otp(req: VerifyOTPRequest, db: Any = Depends(get_db), settings=Depend
     db.mark_user_verified(phone)
     user = db.get_user_by_phone(phone)
     token = auth_svc.issue_jwt(str(user["id"]), settings)
-    return {"token": token, "user": user}
+    is_new = not user.get("name")
+    return {"token": token, "user": user, "is_new_user": is_new}
 
 
 @router.get("/me")
