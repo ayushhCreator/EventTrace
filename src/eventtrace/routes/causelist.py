@@ -29,17 +29,19 @@ def causelist_search(
     case_ref: str | None = Query(None),
     advocate: str | None = Query(None),
     party: str | None = Query(None),
+    judge: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Any = Depends(get_db),
 ) -> list[dict]:
-    if not any([case_ref, advocate, party]):
-        raise HTTPException(status_code=422, detail="Provide at least one of: case_ref, advocate, party")
+    if not any([case_ref, advocate, party, judge]):
+        raise HTTPException(status_code=422, detail="Provide at least one of: case_ref, advocate, party, judge")
     return db.search_causelist_cases(
         case_ref=case_ref,
         advocate=advocate,
         party=party,
+        judge=judge,
         date_from=date_from,
         date_to=date_to,
         limit=limit,

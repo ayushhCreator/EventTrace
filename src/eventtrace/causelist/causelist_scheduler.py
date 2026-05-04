@@ -155,8 +155,8 @@ def run_scheduler(settings: Any, db: Any) -> None:
 def main() -> None:
     """CLI entry point: chd-schedule-causelist"""
     import logging as _logging
-    from .config import Settings
-    from .db import get_db
+    from ..config import Settings
+    from ..db import get_db
 
     _logging.basicConfig(
         level=_logging.INFO,

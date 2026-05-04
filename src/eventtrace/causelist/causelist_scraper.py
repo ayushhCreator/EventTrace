@@ -91,7 +91,7 @@ def main() -> None:
     """CLI entry point: chd-scrape-vc [YYYY-MM-DD]"""
     import sys
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    from .config import Settings
+    from ..config import Settings
     settings = Settings()
     db = DB(settings.db_path)
     db.ensure_schema()

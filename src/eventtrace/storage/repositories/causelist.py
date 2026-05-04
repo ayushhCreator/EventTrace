@@ -69,6 +69,7 @@ class SQLiteCauselistRepository:
         case_ref: str | None = None,
         advocate: str | None = None,
         party: str | None = None,
+        judge: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
@@ -90,6 +91,9 @@ class SQLiteCauselistRepository:
             p = party.upper()
             clauses.append("(cc.petitioner LIKE ? OR cc.respondent LIKE ?)")
             params += [f"%{p}%", f"%{p}%"]
+        if judge:
+            clauses.append("cb.judges_json LIKE ?")
+            params.append(f"%{judge.upper()}%")
         if date_from:
             clauses.append("cc.list_date >= ?")
             params.append(date_from)
@@ -263,6 +267,7 @@ class PostgresCauselistRepository:
         case_ref: str | None = None,
         advocate: str | None = None,
         party: str | None = None,
+        judge: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
@@ -283,6 +288,9 @@ class PostgresCauselistRepository:
         if party:
             clauses.append("(cc.petitioner ILIKE %s OR cc.respondent ILIKE %s)")
             params += [f"%{party}%", f"%{party}%"]
+        if judge:
+            clauses.append("cb.judges_json ILIKE %s")
+            params.append(f"%{judge}%")
         if date_from:
             clauses.append("cc.list_date >= %s")
             params.append(date_from)

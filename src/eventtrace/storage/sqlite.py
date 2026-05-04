@@ -328,8 +328,8 @@ class DB:
     def get_causelist_case_by_serial(self, list_date: str, court_no: str, serial_no: int) -> dict[str, Any] | None:
         return self._causelist.get_causelist_case_by_serial(list_date, court_no, serial_no)
 
-    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, date_from: str | None = None, date_to: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._causelist.search_causelist_cases(case_ref, advocate, party, date_from, date_to, limit)
+    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, limit)
 
     def list_causelist_dates(self) -> list[str]:
         return self._causelist.list_causelist_dates()
