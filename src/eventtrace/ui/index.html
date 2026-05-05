@@ -689,6 +689,14 @@
       font-size: 0.92rem;
     }
   }
+  .toggle-group { display: inline-flex; border-radius: 6px; overflow: hidden; gap: 2px; }
+  .toggle-btn {
+    padding: 4px 10px; border: 1px solid var(--border); background: #f5f5f5;
+    cursor: pointer; font-size: 0.74rem; color: var(--ink); transition: background 0.12s;
+    line-height: 20px;
+  }
+  .toggle-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .toggle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -718,6 +726,14 @@
     <span style="color:var(--ink-light)">Auto-refresh 15s</span>
   </div>
   <div class="right">
+    <div class="toggle-group" id="side-toggle" title="Switch between Appellate and Original side">
+      <button class="toggle-btn active" data-value="APPELLATE SIDE">Appellate</button>
+      <button class="toggle-btn" data-value="ORIGINAL SIDE">Original</button>
+    </div>
+    <div class="toggle-group" id="type-toggle" title="Switch between Daily and Monthly cause list">
+      <button class="toggle-btn active" data-value="DAILY">Daily</button>
+      <button class="toggle-btn" data-value="MONTHLY">Monthly</button>
+    </div>
     <select id="date-select" style="height:28px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;padding:0 8px;color:var(--ink);background:#fff;cursor:pointer;">
       <option value="">Loading dates…</option>
     </select>
@@ -1003,6 +1019,9 @@ function esc(s) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+let activeSide = 'APPELLATE SIDE';
+let activeListType = 'DAILY';
+
 let allRows = [];        // all rows fetched from API
 let vcMap = {};          // {room_no: zoom_url}
 let durationMap = {};    // {court_id: serial_start_time ISO}
@@ -1194,9 +1213,25 @@ function getFilteredRows() {
 // ── Cause list link ───────────────────────────────────────────────────────────
 
 function causeListUrl(dateStr) {
-  // dateStr = YYYY-MM-DD → cla{DD}{MM}{YYYY}.html
   const [y, m, d] = dateStr.split('-');
-  return `https://calcuttahighcourt.gov.in/downloads/old_cause_lists/AS/cla${d}${m}${y}.html`;
+  const isOriginal = activeSide === 'ORIGINAL SIDE';
+  const isMonthly  = activeListType === 'MONTHLY';
+  const path   = isMonthly ? (isOriginal ? 'monthly/OS' : 'monthly/AS') : (isOriginal ? 'OS' : 'AS');
+  const prefix = isOriginal ? 'cl' : 'cla';
+  return `https://calcuttahighcourt.gov.in/downloads/old_cause_lists/${path}/${prefix}${d}${m}${y}.html`;
+}
+
+function updateMonthlyAvailability(dateStr) {
+  const monthlyBtn = document.querySelector('#type-toggle [data-value="MONTHLY"]');
+  if (!monthlyBtn) return;
+  const day = dateStr ? parseInt(dateStr.split('-')[2], 10) : 0;
+  const disable = day > 7;
+  monthlyBtn.disabled = disable;
+  if (disable && activeListType === 'MONTHLY') {
+    activeListType = 'DAILY';
+    document.querySelector('#type-toggle [data-value="DAILY"]').classList.add('active');
+    monthlyBtn.classList.remove('active');
+  }
 }
 
 function updateCauseListLink(dateStr) {
@@ -1207,6 +1242,7 @@ function updateCauseListLink(dateStr) {
     link.style.display = 'none';
     return;
   }
+  updateMonthlyAvailability(dateStr);
   link.href = causeListUrl(dateStr);
   link.style.display = 'inline-flex';
   // Human-readable date: 2026-04-21 → "21 Apr 2026"
@@ -1493,6 +1529,24 @@ document.getElementById('date-select').addEventListener('change', function() {
   renderTable();
 });
 
+document.querySelectorAll('#side-toggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    if (this.disabled) return;
+    activeSide = this.dataset.value;
+    document.querySelectorAll('#side-toggle .toggle-btn').forEach(b => b.classList.toggle('active', b === this));
+    updateCauseListLink(selectedDate || todayIST());
+  });
+});
+
+document.querySelectorAll('#type-toggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    if (this.disabled) return;
+    activeListType = this.dataset.value;
+    document.querySelectorAll('#type-toggle .toggle-btn').forEach(b => b.classList.toggle('active', b === this));
+    updateCauseListLink(selectedDate || todayIST());
+  });
+});
+
 document.getElementById('filter-input').addEventListener('input', function() {
   filterText = this.value;
   applyFilter();
@@ -1506,6 +1560,7 @@ let intervalId = setInterval(fetchAndRender, 15000);
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
+updateMonthlyAvailability(todayIST());
 fetchAndRender();
 
 // ── Alert modal ───────────────────────────────────────────────────────────────

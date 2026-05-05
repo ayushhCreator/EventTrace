@@ -418,6 +418,17 @@ def main() -> None:
         api_thread = threading.Thread(target=_start_api_thread, args=(settings,), daemon=True, name="api")
         api_thread.start()
 
+    # Run causelist backfill once on startup (non-blocking)
+    def _backfill_once() -> None:
+        try:
+            from ..causelist.backfill import backfill_causelist
+            backfill_causelist(days=7)
+        except Exception as exc:
+            log.warning("Startup backfill failed: %s", exc)
+
+    threading.Thread(target=_backfill_once, daemon=True, name="causelist-backfill").start()
+    log.info("Causelist backfill started in background")
+
     # Start VC scrape scheduler in background
     vc_thread = threading.Thread(
         target=_vc_scheduler_thread, args=(settings, db), daemon=True, name="vc-scheduler"

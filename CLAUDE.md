@@ -25,7 +25,23 @@ python -m playwright install
 Run all three together locally (3 terminals): `chd-api` + `chd-run-monitor` + `chd-schedule-causelist`.
 
 API runs at `http://127.0.0.1:8009` by default. Override with `CHD_API_HOST` / `CHD_API_PORT`.
-UI at `http://127.0.0.1:8009/ui`.
+Legacy embedded UI at `http://127.0.0.1:8009/ui` (do NOT edit unless explicitly told).
+
+## Frontend (new UI)
+
+The real UI is a separate React/TypeScript/Tailwind app at `/home/ayush-raj/The_Base/EventTrace-Web`.
+**All UI changes go there unless the user explicitly says to edit the old `src/eventtrace/ui/` files.**
+
+| Task | Command |
+|------|---------|
+| Dev server | `cd /home/ayush-raj/The_Base/EventTrace-Web && npm run dev` |
+| Build | `npm run build` |
+
+Key files:
+- `src/api/client.ts` — all API calls
+- `src/pages/Causelist.tsx` — cause list browser
+- `src/pages/CauselistSearch.tsx` — case search
+- `src/pages/DisplayBoard.tsx` — real-time monitor
 
 ## Local Postgres (Docker)
 

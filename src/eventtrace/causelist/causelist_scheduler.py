@@ -1,8 +1,13 @@
 """Causelist daily scheduler with retry logic.
 
 Schedule (IST): attempt at 20:30, 21:00, 21:30, 22:00.
-Stop as soon as one attempt succeeds.
-If all four fail: log error + Telegram alert, sleep until next day.
+Iterates all registered sources; stops retrying a source once it succeeds.
+If all sources fail across all windows: Telegram alert, sleep until next day.
+
+Date logic: court publishes the *next working day's* list each evening.
+  Mon–Thu evening → next day (Tue–Fri)
+  Friday evening  → Monday (skip weekend)
+  Weekend evening → Monday
 """
 from __future__ import annotations
 
@@ -15,7 +20,6 @@ from ..common.time import IST, ist_now
 
 log = logging.getLogger(__name__)
 
-# Four attempt windows (IST HH:MM), 30 min apart
 _WINDOWS_IST = ["20:30", "21:00", "21:30", "22:00"]
 
 
@@ -24,38 +28,59 @@ def _now_ist() -> datetime:
 
 
 def _seconds_until(hhmm: str, ref: datetime) -> float:
-    """Seconds from ref until today's hhmm (IST). Negative if already past."""
     h, m = map(int, hhmm.split(":"))
     target = ref.replace(hour=h, minute=m, second=0, microsecond=0)
     return (target - ref).total_seconds()
 
 
 def _next_window_after_now() -> tuple[str | None, float]:
-    """Return (window_str, seconds_to_wait) for the next window after now.
-
-    Returns (None, seconds_to_tomorrow_first_window) if all windows are past.
-    """
     now = _now_ist()
     for w in _WINDOWS_IST:
         secs = _seconds_until(w, now)
         if secs > 0:
             return w, secs
-    # All past — return time until tomorrow's first window
     tomorrow = now.date() + timedelta(days=1)
     h, m = map(int, _WINDOWS_IST[0].split(":"))
     next_day = datetime(tomorrow.year, tomorrow.month, tomorrow.day, h, m, tzinfo=IST)
     return None, (next_day - now).total_seconds()
 
 
-def _already_scraped(db: Any, for_date: date) -> bool:
+def _next_working_day(from_date: date) -> date:
+    """Next calendar day, skipping weekends (court closed Sat/Sun)."""
+    d = from_date + timedelta(days=1)
+    while d.weekday() >= 5:  # 5=Saturday, 6=Sunday
+        d += timedelta(days=1)
+    return d
+
+
+def _source_already_scraped(db: Any, for_date: date, source_id: str, schedule: str = "daily") -> bool:
+    """True if this source already has data for the relevant period."""
     try:
+        if schedule == "monthly":
+            # Monthly: check if any day in this calendar month is already stored
+            year, month = for_date.year, for_date.month
+            for day in range(1, 8):
+                try:
+                    candidate = date(year, month, day)
+                except ValueError:
+                    break
+                if candidate.weekday() < 5:
+                    if db.is_causelist_source_scraped(candidate.isoformat(), source_id):
+                        return True
+            return False
+        return db.is_causelist_source_scraped(for_date.isoformat(), source_id)
+    except AttributeError:
         return for_date.isoformat() in db.list_causelist_dates()
     except Exception:
         return False
 
 
+def _store_result(db: Any, result: Any, scraped_at: datetime | None = None) -> int:
+    """Persist a SourceResult to DB. Returns number of cases stored."""
+    return db.store_causelist(result.courts, scraped_at=scraped_at)
+
+
 def _telegram_alert(settings: Any, message: str) -> None:
-    """Send Telegram message to admin if TELEGRAM_TOKEN + ADMIN_CHAT_ID set."""
     admin_chat_id = getattr(settings, "admin_chat_id", None)
     if not settings.telegram_token or not admin_chat_id:
         log.warning("No admin_chat_id configured — skipping Telegram alert")
@@ -71,31 +96,37 @@ def _telegram_alert(settings: Any, message: str) -> None:
         log.error("Telegram alert failed: %s", exc)
 
 
-def _attempt_scrape(db: Any, for_date: date) -> bool:
-    """Fetch, parse, store. Returns True on success."""
-    from .causelist_parser import fetch_causelist_html, parse_causelist
+def _attempt_all_sources(
+    db: Any,
+    target_date: date,
+    sources: list[Any],
+    pending: set[str],
+) -> set[str]:
+    """Run all pending sources. Returns set of source_ids that succeeded."""
+    succeeded: set[str] = set()
+    for source in sources:
+        if source.source_id not in pending:
+            continue
+        log.info("[%s] scraping %s ...", source.source_id, target_date)
+        result = source.fetch(target_date)
+        if result.ok:
+            n = _store_result(db, result)
+            log.info("[%s] stored %d cases (%d courts) for %s",
+                     source.source_id, n, len(result.courts), target_date)
+            succeeded.add(source.source_id)
+        else:
+            log.warning("[%s] no data for %s: %s",
+                        source.source_id, target_date, result.error or "empty")
+    return succeeded
 
-    log.info("Scraping causelist for %s ...", for_date)
-    try:
-        html = fetch_causelist_html(for_date)
-        if not html:
-            log.warning("No HTML returned for %s", for_date)
-            return False
-        parsed = parse_causelist(html, for_date)
-        n = db.store_causelist(parsed)
-        log.info("Stored %d cases across %d courts for %s", n, len(parsed), for_date)
-        return True
-    except Exception as exc:
-        log.error("Scrape failed: %s", exc)
-        return False
 
-
-def _sleep_until_tomorrow(settings: Any, for_date: date) -> None:
-    """Alert + sleep until tomorrow's first window."""
-    msg = f"Causelist scrape FAILED for {for_date} — all 4 retry windows exhausted."
+def _sleep_until_tomorrow(settings: Any, failed_ids: set[str], target_date: date) -> None:
+    msg = (
+        f"Causelist scrape FAILED for {target_date} — all 4 windows exhausted. "
+        f"Sources still missing: {', '.join(sorted(failed_ids))}"
+    )
     log.error(msg)
     _telegram_alert(settings, msg)
-
     _, secs = _next_window_after_now()
     secs = max(60.0, secs)
     log.info("Sleeping %.0f min until next day's first window.", secs / 60)
@@ -103,27 +134,40 @@ def _sleep_until_tomorrow(settings: Any, for_date: date) -> None:
 
 
 def run_scheduler(settings: Any, db: Any) -> None:
-    """Main loop — runs forever, scraping daily cause list with retries."""
-    log.info("Causelist scheduler started. Windows (IST): %s", ", ".join(_WINDOWS_IST))
+    """Main loop — runs forever, scraping all registered sources each day."""
+    from .registry import build_sources
+
+    sources = build_sources()
+    log.info(
+        "Causelist scheduler started. Sources: %s. Windows (IST): %s",
+        [s.source_id for s in sources],
+        ", ".join(_WINDOWS_IST),
+    )
 
     while True:
         now = _now_ist()
-        today = now.date()
+        target_date = _next_working_day(now.date())
 
-        # Already have today's data — sleep until tomorrow's first window
-        if _already_scraped(db, today):
+        # Compute which sources still need scraping for target_date.
+        # Skip sources whose schedule doesn't apply (monthly only in first week).
+        pending = {
+            s.source_id for s in sources
+            if s.should_run_for(target_date)
+            and not _source_already_scraped(
+                db, target_date, s.source_id,
+                schedule=getattr(getattr(s, "_cfg", None), "schedule", "daily"),
+            )
+        }
+
+        if not pending:
             _, secs = _next_window_after_now()
-            # If we're past all today's windows, secs is time until tomorrow — correct.
-            # If we're before today's windows, sleep until first window is still correct
-            # (we'll re-check and find it scraped again).
             secs = max(60.0, secs)
-            log.info("Already have %s. Sleeping %.0f min.", today, secs / 60)
+            log.info("All sources done for %s. Sleeping %.0f min.", target_date, secs / 60)
             time.sleep(secs)
             continue
 
         now_hhmm = now.strftime("%H:%M")
 
-        # Before the first window — wait
         if now_hhmm < _WINDOWS_IST[0]:
             next_w, secs = _next_window_after_now()
             secs = max(60.0, secs)
@@ -131,24 +175,27 @@ def run_scheduler(settings: Any, db: Any) -> None:
             time.sleep(secs)
             continue
 
-        # After last window and still not scraped — all windows exhausted
         if now_hhmm > _WINDOWS_IST[-1]:
-            _sleep_until_tomorrow(settings, today)
+            _sleep_until_tomorrow(settings, pending, target_date)
             continue
 
-        # We're in the window range — attempt scrape
-        success = _attempt_scrape(db, today)
-        if success:
-            continue  # loop will detect already_scraped and sleep until tomorrow
+        # In window — attempt all pending sources
+        log.info("Window open. Attempting %d pending source(s) for %s.", len(pending), target_date)
+        succeeded = _attempt_all_sources(db, target_date, sources, pending)
+        pending -= succeeded
 
-        # Failed — find next window
+        if not pending:
+            continue  # all done — next iteration sleeps until tomorrow
+
         next_w, secs = _next_window_after_now()
         if next_w is None:
-            # No more windows today
-            _sleep_until_tomorrow(settings, today)
+            _sleep_until_tomorrow(settings, pending, target_date)
         else:
             secs = max(60.0, secs)
-            log.info("Scrape failed. Next attempt at %s IST (%.0f min).", next_w, secs / 60)
+            log.info(
+                "%d source(s) still pending. Next attempt at %s IST (%.0f min): %s",
+                len(pending), next_w, secs / 60, sorted(pending),
+            )
             time.sleep(secs)
 
 

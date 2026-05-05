@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 log = logging.getLogger(__name__)
+
+_FETCH_WORKERS = 6  # parallel HTTP fetches
 
 
 def _ist_today() -> date:
@@ -18,9 +22,9 @@ def _ist_today() -> date:
 
 
 def _last_n_workdays(n: int) -> list[date]:
-    """Return up to n weekdays going back from yesterday (IST)."""
+    """Return up to n weekdays going back from today (IST), inclusive."""
     days: list[date] = []
-    d = _ist_today() - timedelta(days=1)
+    d = _ist_today()
     while len(days) < n:
         if d.weekday() < 5:  # Mon–Fri
             days.append(d)
@@ -28,34 +32,65 @@ def _last_n_workdays(n: int) -> list[date]:
     return days
 
 
+def _fetch_one(source: Any, for_date: date) -> Any:
+    """Fetch one (source, date) pair. Returns SourceResult."""
+    log.info("[%s] fetching %s …", source.source_id, for_date)
+    return source.fetch(for_date)
+
+
 def backfill_causelist(days: int = 7) -> None:
-    from .causelist_parser import fetch_causelist_html, parse_causelist
+    from .registry import build_sources
+    from .causelist_scheduler import _source_already_scraped
     from ..config import Settings
     from ..db import get_db
 
     settings = Settings()
     db = get_db(settings)
-    db.ensure_schema()
 
-    existing = set(db.list_causelist_dates())
-    targets = [d for d in _last_n_workdays(days) if d.isoformat() not in existing]
+    sources = build_sources()
+    targets = _last_n_workdays(days)
 
-    if not targets:
-        log.info("Backfill: all %d days already in DB", days)
+    # Build list of (source, date) pairs that need fetching
+    work = []
+    for source in sources:
+        sched = getattr(getattr(source, "_cfg", None), "schedule", "daily")
+        for for_date in targets:
+            if not source.should_run_for(for_date):
+                continue
+            if _source_already_scraped(db, for_date, source.source_id, schedule=sched):
+                log.info("[%s] %s already scraped — skip", source.source_id, for_date)
+                continue
+            work.append((source, for_date))
+
+    if not work:
+        log.info("Backfill: nothing to fetch")
         return
 
-    log.info("Backfill: fetching %d missing dates: %s", len(targets), [str(d) for d in targets])
+    log.info("Backfill: %d (source, date) pairs to fetch (workers=%d)", len(work), _FETCH_WORKERS)
 
-    for for_date in targets:
-        log.info("Fetching causelist for %s …", for_date)
-        html = fetch_causelist_html(for_date)
-        if not html:
-            log.warning("No causelist available for %s — skipping", for_date)
+    # Fetch all in parallel, store sequentially (DB writes not thread-safe for SQLite)
+    results = {}
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
+        futures = {pool.submit(_fetch_one, src, d): (src, d) for src, d in work}
+        for future in as_completed(futures):
+            src, d = futures[future]
+            try:
+                result = future.result()
+                results[(src.source_id, d)] = result
+            except Exception as exc:
+                log.error("[%s] %s fetch exception: %s", src.source_id, d, exc)
+
+    # Store in order (sequential to avoid concurrent DB writes)
+    for source, for_date in work:
+        result = results.get((source.source_id, for_date))
+        if result is None:
             continue
-        parsed = parse_causelist(html, for_date)
-        db.store_causelist(parsed)
-        total_cases = sum(len(c["cases"]) for c in parsed)
-        log.info("Stored %d cases (%d courts) for %s", total_cases, len(parsed), for_date)
+        if not result.ok:
+            log.warning("[%s] no data for %s: %s", source.source_id, for_date, result.error or "empty")
+            continue
+        n = db.store_causelist(result.courts)
+        log.info("[%s] stored %d cases (%d courts) for %s",
+                 source.source_id, n, len(result.courts), for_date)
 
 
 def main() -> None:

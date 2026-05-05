@@ -222,6 +222,9 @@ class DB:
 
             # Non-destructive column migrations — safe to re-run
             for _col_sql in [
+                # causelist_bench: source tracking
+                "ALTER TABLE causelist_bench ADD COLUMN source_id TEXT",
+                # subscriptions
                 "ALTER TABLE subscriptions ADD COLUMN hearing_date TEXT",
                 "ALTER TABLE subscriptions ADD COLUMN contact_type TEXT NOT NULL DEFAULT 'telegram'",
                 "ALTER TABLE subscriptions ADD COLUMN last_notified_serial INTEGER",
@@ -234,6 +237,157 @@ class DB:
                     con.execute(_col_sql)
                 except sqlite3.OperationalError:
                     pass  # column already exists
+
+            # Backfill NULLs so existing rows have canonical side/list_type/source_id.
+            con.execute("""
+                UPDATE causelist_bench
+                SET side      = 'APPELLATE SIDE',
+                    list_type = 'DAILY',
+                    source_id = 'appellate_static'
+                WHERE side IS NULL OR list_type IS NULL
+            """)
+
+            # SQLite can't ALTER a UNIQUE constraint — migrate to new schema via
+            # table rename if the old 2-col constraint is still in place.
+            old_schema = con.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='causelist_bench'"
+            ).fetchone()
+            # Match only the old 2-column constraint — not the new 4-column one which
+            # also starts with "UNIQUE(list_date, court_no".
+            needs_migration = (
+                old_schema is not None
+                and "UNIQUE(list_date, court_no)" in (old_schema["sql"] or "")
+                and "UNIQUE(list_date, court_no, side" not in (old_schema["sql"] or "")
+            )
+            # Detect if a previous migration (without legacy_alter_table) left
+            # causelist_case.bench_id FK pointing at causelist_bench_old instead
+            # of causelist_bench. If so, rebuild causelist_case with the correct FK.
+            case_schema_row = con.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='causelist_case'"
+            ).fetchone()
+            case_sql = (case_schema_row["sql"] or "") if case_schema_row else ""
+            if "causelist_bench_old" in case_sql:
+                # The FK was silently rewritten — rebuild causelist_case with correct FK
+                con.executescript("""
+                    PRAGMA legacy_alter_table = ON;
+                    ALTER TABLE causelist_case RENAME TO causelist_case_old;
+                    PRAGMA legacy_alter_table = OFF;
+
+                    CREATE TABLE causelist_case (
+                      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                      bench_id        INTEGER NOT NULL REFERENCES causelist_bench(id) ON DELETE CASCADE,
+                      list_date       TEXT NOT NULL,
+                      court_no        TEXT NOT NULL,
+                      serial_no       INTEGER NOT NULL,
+                      case_ref        TEXT,
+                      case_type       TEXT,
+                      case_number     TEXT,
+                      case_year       INTEGER,
+                      petitioner      TEXT,
+                      respondent      TEXT,
+                      advocate        TEXT,
+                      pro_se          INTEGER NOT NULL DEFAULT 0,
+                      ia_numbers_json TEXT NOT NULL DEFAULT '[]',
+                      section         TEXT,
+                      subsection      TEXT,
+                      hearing_type    TEXT,
+                      raw_text        TEXT,
+                      scraped_at      TEXT NOT NULL,
+                      UNIQUE(bench_id, serial_no)
+                    );
+
+                    INSERT OR IGNORE INTO causelist_case
+                      SELECT * FROM causelist_case_old;
+
+                    DROP TABLE causelist_case_old;
+
+                    CREATE INDEX IF NOT EXISTS idx_causelist_case_ref
+                      ON causelist_case(case_ref);
+                    CREATE INDEX IF NOT EXISTS idx_causelist_case_date_court
+                      ON causelist_case(list_date, court_no);
+                    CREATE INDEX IF NOT EXISTS idx_causelist_case_type_year
+                      ON causelist_case(case_type, case_year);
+                    CREATE INDEX IF NOT EXISTS idx_causelist_case_advocate
+                      ON causelist_case(advocate);
+                """)
+
+            # Recover from a previously aborted migration that left the old table around.
+            orphan = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='causelist_bench_old'"
+            ).fetchone()
+            if orphan and old_schema is None:
+                # causelist_bench was renamed but new one never created — recreate + copy
+                con.executescript("""
+                    PRAGMA legacy_alter_table = ON;
+                    CREATE TABLE IF NOT EXISTS causelist_bench (
+                      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                      list_date    TEXT NOT NULL,
+                      court_no     TEXT NOT NULL,
+                      bench_label  TEXT,
+                      side         TEXT NOT NULL DEFAULT 'APPELLATE SIDE',
+                      list_type    TEXT NOT NULL DEFAULT 'DAILY',
+                      judges_json  TEXT NOT NULL DEFAULT '[]',
+                      not_sitting  INTEGER NOT NULL DEFAULT 0,
+                      vc_link      TEXT,
+                      jurisdiction TEXT,
+                      scraped_at   TEXT NOT NULL,
+                      source_id    TEXT,
+                      UNIQUE(list_date, court_no, side, list_type)
+                    );
+                    INSERT OR IGNORE INTO causelist_bench
+                      SELECT id, list_date, court_no, bench_label,
+                             COALESCE(side, 'APPELLATE SIDE'),
+                             COALESCE(list_type, 'DAILY'),
+                             judges_json, not_sitting, vc_link, jurisdiction, scraped_at,
+                             source_id
+                      FROM causelist_bench_old;
+                    DROP TABLE causelist_bench_old;
+                    PRAGMA legacy_alter_table = OFF;
+                """)
+
+            if needs_migration:
+                # PRAGMA legacy_alter_table prevents SQLite 3.26+ from rewriting
+                # FK references in causelist_case when we rename causelist_bench.
+                # Without it, caselist_case.bench_id FK silently re-points to
+                # causelist_bench_old, making UPSERTs fail after the DROP.
+                con.executescript("""
+                    PRAGMA legacy_alter_table = ON;
+
+                    ALTER TABLE causelist_bench RENAME TO causelist_bench_old;
+
+                    CREATE TABLE causelist_bench (
+                      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                      list_date    TEXT NOT NULL,
+                      court_no     TEXT NOT NULL,
+                      bench_label  TEXT,
+                      side         TEXT NOT NULL DEFAULT 'APPELLATE SIDE',
+                      list_type    TEXT NOT NULL DEFAULT 'DAILY',
+                      judges_json  TEXT NOT NULL DEFAULT '[]',
+                      not_sitting  INTEGER NOT NULL DEFAULT 0,
+                      vc_link      TEXT,
+                      jurisdiction TEXT,
+                      scraped_at   TEXT NOT NULL,
+                      source_id    TEXT,
+                      UNIQUE(list_date, court_no, side, list_type)
+                    );
+
+                    INSERT INTO causelist_bench
+                      SELECT id, list_date, court_no, bench_label,
+                             COALESCE(side, 'APPELLATE SIDE'),
+                             COALESCE(list_type, 'DAILY'),
+                             judges_json, not_sitting, vc_link, jurisdiction, scraped_at,
+                             source_id
+                      FROM causelist_bench_old;
+
+                    DROP TABLE causelist_bench_old;
+
+                    PRAGMA legacy_alter_table = OFF;
+
+                    CREATE INDEX IF NOT EXISTS idx_causelist_bench_date
+                      ON causelist_bench(list_date);
+                    CREATE INDEX IF NOT EXISTS idx_causelist_bench_court
+                      ON causelist_bench(court_no, list_date);
+                """)
 
     # ── Events delegation ────────────────────────────────────────────────────
 
@@ -340,23 +494,26 @@ class DB:
 
     # ── Causelist delegation ─────────────────────────────────────────────────
 
-    def get_causelist_bench(self, list_date: str, court_no: str) -> dict[str, Any] | None:
-        return self._causelist.get_causelist_bench(list_date, court_no)
+    def get_causelist_bench(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> dict[str, Any] | None:
+        return self._causelist.get_causelist_bench(list_date, court_no, side=side, list_type=list_type)
 
-    def list_causelist_benches(self, list_date: str) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_benches(list_date)
+    def list_causelist_benches(self, list_date: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
+        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type)
 
-    def list_causelist_cases(self, list_date: str, court_no: str) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_cases(list_date, court_no)
+    def list_causelist_cases(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
+        return self._causelist.list_causelist_cases(list_date, court_no, side=side, list_type=list_type)
 
     def get_causelist_case_by_serial(self, list_date: str, court_no: str, serial_no: int) -> dict[str, Any] | None:
         return self._causelist.get_causelist_case_by_serial(list_date, court_no, serial_no)
 
-    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, limit)
+    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, side: str | None = None, list_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, side=side, list_type=list_type, limit=limit)
 
     def list_causelist_dates(self) -> list[str]:
         return self._causelist.list_causelist_dates()
+
+    def is_causelist_source_scraped(self, list_date: str, source_id: str) -> bool:
+        return self._causelist.is_causelist_source_scraped(list_date, source_id)
 
     def list_causelist_prefixes(self) -> list[str]:
         return self._causelist.list_causelist_prefixes()

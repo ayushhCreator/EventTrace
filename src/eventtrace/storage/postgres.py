@@ -278,6 +278,91 @@ class PostgresDB:
             except Exception:
                 pass
 
+            # ── causelist_bench schema migration ─────────────────────────────
+            # Step 1: add source_id column
+            try:
+                cur.execute(
+                    "ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS source_id TEXT"
+                )
+            except Exception:
+                pass
+
+            # Step 2: normalise side/list_type values and backfill source_id.
+            # Historical data has mixed-case values, non-breaking spaces, and
+            # NULL source_id. Canonicalise everything so ON CONFLICT works.
+            try:
+                cur.execute(r"""
+                    UPDATE causelist_bench
+                    SET side = CASE
+                        WHEN regexp_replace(upper(side), '\s+', ' ', 'g') LIKE '%ORIGINAL%'
+                            THEN 'ORIGINAL SIDE'
+                        ELSE 'APPELLATE SIDE'
+                    END
+                    WHERE side IS NULL
+                       OR upper(side) != side
+                       OR side LIKE '%' || chr(160) || '%'
+                """)
+                cur.execute("""
+                    UPDATE causelist_bench
+                    SET list_type = upper(list_type)
+                    WHERE list_type IS NOT NULL AND upper(list_type) != list_type
+                """)
+                cur.execute("""
+                    UPDATE causelist_bench
+                    SET list_type = 'DAILY'
+                    WHERE list_type IS NULL
+                """)
+                cur.execute("""
+                    UPDATE causelist_bench
+                    SET source_id = CASE
+                        WHEN side = 'ORIGINAL SIDE' THEN 'original_unknown'
+                        ELSE 'appellate_static'
+                    END
+                    WHERE source_id IS NULL
+                """)
+            except Exception:
+                pass
+
+            # Step 3: drop old 2-column unique constraint and replace with 4-column one.
+            # We find the constraint by searching pg_constraint regardless of its
+            # auto-generated name, so this survives Supabase / Railway naming quirks.
+            try:
+                cur.execute("""
+                    DO $$
+                    DECLARE
+                        cname TEXT;
+                    BEGIN
+                        -- Find any unique constraint on causelist_bench that covers
+                        -- exactly (list_date, court_no) — 2 columns.
+                        SELECT c.conname INTO cname
+                        FROM pg_constraint c
+                        JOIN pg_class t ON t.oid = c.conrelid
+                        WHERE t.relname = 'causelist_bench'
+                          AND c.contype = 'u'
+                          AND array_length(c.conkey, 1) = 2
+                        LIMIT 1;
+
+                        IF cname IS NOT NULL THEN
+                            EXECUTE format('ALTER TABLE causelist_bench DROP CONSTRAINT %I', cname);
+                        END IF;
+
+                        -- Add new 4-column constraint (idempotent via IF NOT EXISTS check)
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint c
+                            JOIN pg_class t ON t.oid = c.conrelid
+                            WHERE t.relname = 'causelist_bench'
+                              AND c.contype = 'u'
+                              AND array_length(c.conkey, 1) = 4
+                        ) THEN
+                            ALTER TABLE causelist_bench
+                                ADD CONSTRAINT causelist_bench_unique_source
+                                UNIQUE (list_date, court_no, side, list_type);
+                        END IF;
+                    END $$;
+                """)
+            except Exception:
+                pass
+
     # ── Events delegation ────────────────────────────────────────────────────
 
     def upsert_current_state(self, court_id: str, row: dict[str, Any], seen_time: datetime) -> None:
@@ -383,20 +468,23 @@ class PostgresDB:
 
     # ── Causelist delegation ─────────────────────────────────────────────────
 
-    def get_causelist_bench(self, list_date: str, court_no: str) -> dict[str, Any] | None:
-        return self._causelist.get_causelist_bench(list_date, court_no)
+    def get_causelist_bench(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> dict[str, Any] | None:
+        return self._causelist.get_causelist_bench(list_date, court_no, side=side, list_type=list_type)
 
-    def list_causelist_benches(self, list_date: str) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_benches(list_date)
+    def list_causelist_benches(self, list_date: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
+        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type)
 
-    def list_causelist_cases(self, list_date: str, court_no: str) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_cases(list_date, court_no)
+    def list_causelist_cases(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
+        return self._causelist.list_causelist_cases(list_date, court_no, side=side, list_type=list_type)
 
     def get_causelist_case_by_serial(self, list_date: str, court_no: str, serial_no: int) -> dict[str, Any] | None:
         return self._causelist.get_causelist_case_by_serial(list_date, court_no, serial_no)
 
-    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, limit)
+    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, side: str | None = None, list_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, side=side, list_type=list_type, limit=limit)
+
+    def is_causelist_source_scraped(self, list_date: str, source_id: str) -> bool:
+        return self._causelist.is_causelist_source_scraped(list_date, source_id)
 
     def list_causelist_dates(self) -> list[str]:
         return self._causelist.list_causelist_dates()

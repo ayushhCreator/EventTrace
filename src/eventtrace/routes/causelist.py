@@ -32,6 +32,8 @@ def causelist_search(
     judge: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
+    side: str | None = Query(None),
+    list_type: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Any = Depends(get_db),
 ) -> list[dict]:
@@ -44,25 +46,37 @@ def causelist_search(
         judge=judge,
         date_from=date_from,
         date_to=date_to,
+        side=side,
+        list_type=list_type,
         limit=limit,
     )
 
 
 @router.get("/{list_date}")
-def causelist_summary(list_date: str, db: Any = Depends(get_db)) -> list[dict]:
+def causelist_summary(
+    list_date: str,
+    side: str | None = Query(None),
+    list_type: str | None = Query(None),
+    db: Any = Depends(get_db),
+) -> list[dict]:
     if not _DATE_RE.match(list_date):
         raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
-    return db.list_causelist_benches(list_date)
+    return db.list_causelist_benches(list_date, side=side, list_type=list_type)
 
 
 @router.get("/{list_date}/court/{court_no}")
-def causelist_court(list_date: str, court_no: str, db: Any = Depends(get_db)) -> dict:
+def causelist_court(
+    list_date: str, court_no: str,
+    side: str | None = Query(None),
+    list_type: str | None = Query(None),
+    db: Any = Depends(get_db),
+) -> dict:
     if not _DATE_RE.match(list_date):
         raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
-    bench = db.get_causelist_bench(list_date, court_no)
+    bench = db.get_causelist_bench(list_date, court_no, side=side, list_type=list_type)
     if not bench:
         raise HTTPException(status_code=404, detail="Court not found for that date")
-    cases = db.list_causelist_cases(list_date, court_no)
+    cases = db.list_causelist_cases(list_date, court_no, side=side, list_type=list_type)
     return {"bench": bench, "cases": cases}
 
 

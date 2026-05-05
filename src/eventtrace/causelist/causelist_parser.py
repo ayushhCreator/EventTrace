@@ -27,20 +27,21 @@ def causelist_url(for_date: date) -> str:
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
-def fetch_causelist_html(for_date: date, timeout: int = 120) -> str | None:
-    """Fetch causelist HTML.
+def fetch_causelist_html(
+    for_date: date, timeout: int = 120, url: str | None = None
+) -> str | None:
+    """Fetch causelist HTML via urllib3 (fast, handles CHC legacy TLS).
 
-    Tries urllib3 (fast, handles CHC legacy TLS) with streaming read.
-    Falls back to Playwright if urllib3 fails.
+    Static HTML files on HC server — 404 means file doesn't exist, no
+    Playwright fallback needed. Playwright only used when urllib3 raises
+    a network/TLS exception (not for HTTP error responses).
+
+    Pass `url` explicitly to override the default Appellate Daily URL.
     """
-    url = causelist_url(for_date)
+    if url is None:
+        url = causelist_url(for_date)
     log.info("Fetching causelist %s: %s", for_date, url)
-
-    html = _fetch_urllib3(url, timeout)
-    if html is not None:
-        return html
-    log.info("urllib3 failed, trying Playwright fallback")
-    return _fetch_playwright(url, timeout)
+    return _fetch_urllib3(url, timeout)
 
 
 def _fetch_urllib3(url: str, timeout: int) -> str | None:
@@ -192,14 +193,31 @@ def _clean(s: str | None) -> str | None:
     return re.sub(r"\s+", " ", s.replace("\xa0", " ")).strip() or None
 
 
+_SIDE_CANONICAL = {
+    "APPELLATE": "APPELLATE SIDE",
+    "ORIGINAL": "ORIGINAL SIDE",
+}
+
+
+def _canonical_side(raw: str | None) -> str | None:
+    """Normalise side string to exactly 'APPELLATE SIDE' or 'ORIGINAL SIDE'."""
+    if not raw:
+        return None
+    normalised = re.sub(r"\s+", " ", raw.replace("\xa0", " ").upper()).strip()
+    for key, canonical in _SIDE_CANONICAL.items():
+        if key in normalised:
+            return canonical
+    return normalised or None
+
+
 def parse_court_header(block: str) -> dict[str, Any]:
     clean_block = block.replace("\xa0", " ")
     judges = [_clean(m.group(1)) for m in _JUDGE_RE.finditer(clean_block) if m.group(1).strip()]
     return {
         "court_no":           _first_group(_COURT_NO_RE, clean_block),
         "bench_label":        _clean(_first_group(_BENCH_RE, clean_block, 1)),
-        "side":               (_clean(_first_group(_SIDE_RE, clean_block, 0)) or "").upper() or None,
-        "list_type":          _first_group(_LIST_TYPE_RE, clean_block, 1),
+        "side":               _canonical_side(_first_group(_SIDE_RE, clean_block, 0)),
+        "list_type":          (_first_group(_LIST_TYPE_RE, clean_block, 1) or "").upper() or None,
         "list_date":          _parse_date_from_block(clean_block),
         "judges":             judges,
         "not_sitting":        bool(_NOT_SITTING_RE.search(clean_block)),
