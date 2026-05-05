@@ -146,12 +146,16 @@ def _vc_scheduler_thread(settings: Settings, db: Any) -> None:
 
 # ── Notification helpers ──────────────────────────────────────────────────────
 
+
 def _wa_creds_ok(settings: Settings) -> bool:
-    return bool(settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_whatsapp_from)
+    return bool(
+        settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_whatsapp_from
+    )
 
 
 def _send_wa(settings: Settings, phone: str, body: str) -> None:
     from .whatsapp_bot import send_whatsapp_sync
+
     send_whatsapp_sync(
         account_sid=settings.twilio_account_sid,
         auth_token=settings.twilio_auth_token,
@@ -163,6 +167,7 @@ def _send_wa(settings: Settings, phone: str, body: str) -> None:
 
 def _send_tg(settings: Settings, telegram_id: str, body: str) -> None:
     import httpx
+
     httpx.post(
         f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
         json={"chat_id": telegram_id, "text": body, "parse_mode": "Markdown"},
@@ -199,7 +204,7 @@ def _current_serial_for_room(snapshot: dict[str, dict[str, Any]], room_no: str) 
 
 
 # ── Fix 1: Monitor scrape-failure notifications ───────────────────────────────
-_FAILURE_NOTIFY_THRESHOLD = 5   # consecutive failures before warning
+_FAILURE_NOTIFY_THRESHOLD = 5  # consecutive failures before warning
 _failure_outage_notified = False  # only notify once per outage
 
 
@@ -220,6 +225,7 @@ def _notify_monitor_down(db: Any, settings: Settings) -> None:
 
 
 # ── Fix 2: Court adjournment notifications ────────────────────────────────────
+
 
 def _notify_adjournments(
     changes: list, snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
@@ -260,7 +266,9 @@ def _notify_adjournments(
                 )
                 _deliver(sub, body, settings)
                 db.deactivate_subscription(sub["id"])
-                log.info("Adjournment notified: sub %s room %s target %d", sub["id"], room_no, target)
+                log.info(
+                    "Adjournment notified: sub %s room %s target %d", sub["id"], room_no, target
+                )
             except Exception as exc:
                 log.warning("Adjournment notify failed sub %s: %s", sub["id"], exc)
 
@@ -269,9 +277,7 @@ def _notify_adjournments(
 _REMINDER_DELAY_SECONDS = 15 * 60  # 15 minutes after alert fired
 
 
-def _send_reminders(
-    snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
-) -> None:
+def _send_reminders(snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings) -> None:
     """If alert fired >15 min ago and serial has passed target, send reminder."""
     today_str = ist_today_date().isoformat()
     subs = db.list_active_subscriptions(today=today_str)
@@ -316,6 +322,7 @@ def _send_reminders(
 
 # ── Alert dispatch ────────────────────────────────────────────────────────────
 
+
 def _dispatch_notifications(
     snapshot: dict[str, dict[str, Any]], db: Any, settings: Settings
 ) -> None:
@@ -356,6 +363,7 @@ def _dispatch_notifications(
                 if not sub.get("telegram_id") or not settings.telegram_token:
                     continue
                 from .telegram_bot import send_notification_sync
+
                 send_notification_sync(
                     token=settings.telegram_token,
                     telegram_id=sub["telegram_id"],
@@ -366,16 +374,21 @@ def _dispatch_notifications(
                     log.warning("Twilio creds not set — skipping WhatsApp sub %s", sub["id"])
                     continue
                 from .whatsapp_bot import _build_alert_message
+
                 _send_wa(settings, sub["phone"], _build_alert_message(payload))
             else:
                 continue
 
             db.update_last_notified_serial(sub["id"], current_serial)
-            db.mark_alerted(sub["id"])   # Fix 3: track when alert fired
+            db.mark_alerted(sub["id"])  # Fix 3: track when alert fired
             db.log_notification(sub["id"], json.dumps(payload))
             log.info(
                 "Notified [%s] %s: room %s serial %d (target %d)",
-                contact_type, sub.get("telegram_id") or sub.get("phone"), room_no, current_serial, target,
+                contact_type,
+                sub.get("telegram_id") or sub.get("phone"),
+                room_no,
+                current_serial,
+                target,
             )
         except Exception as exc:
             log.warning("Notification failed for sub %s: %s", sub["id"], exc)
@@ -383,10 +396,12 @@ def _dispatch_notifications(
 
 # ── Main loop ────────────────────────────────────────────────────────────────
 
+
 def _start_api_thread(settings: Settings) -> None:
     """Start the FastAPI server in a background thread (dev convenience)."""
     import os
     import uvicorn
+
     host = os.getenv("CHD_API_HOST", "0.0.0.0")
     port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
@@ -414,14 +429,18 @@ def main() -> None:
 
     # Optionally start API in background thread (set CHD_WITH_API=1)
     import os
+
     if os.getenv("CHD_WITH_API", "0").strip() in {"1", "true", "yes"}:
-        api_thread = threading.Thread(target=_start_api_thread, args=(settings,), daemon=True, name="api")
+        api_thread = threading.Thread(
+            target=_start_api_thread, args=(settings,), daemon=True, name="api"
+        )
         api_thread.start()
 
     # Run causelist backfill once on startup (non-blocking)
     def _backfill_once() -> None:
         try:
             from ..causelist.backfill import backfill_causelist
+
             backfill_causelist(days=7)
         except Exception as exc:
             log.warning("Startup backfill failed: %s", exc)
@@ -453,7 +472,11 @@ def main() -> None:
             for c in changes:
                 log.info(
                     "%s %s: %r -> %r (%ds)",
-                    c.court_id, c.field_name, c.old_value, c.new_value, c.duration_seconds,
+                    c.court_id,
+                    c.field_name,
+                    c.old_value,
+                    c.new_value,
+                    c.duration_seconds,
                 )
 
             # Fix 1: reset failure counter on success
@@ -463,9 +486,17 @@ def main() -> None:
             db.set_monitor_state("last_successful_poll", observed.isoformat())
             db.set_monitor_state("board_active", "1" if rows else "0")
 
-            _dispatch_notifications(snapshot, db, settings)           # alert fire
-            _notify_adjournments(changes, snapshot, db, settings)     # Fix 2: adjournment
-            _send_reminders(snapshot, db, settings)                   # Fix 3: reminder
+            _dispatch_notifications(snapshot, db, settings)  # alert fire
+            _notify_adjournments(changes, snapshot, db, settings)  # Fix 2: adjournment
+            _send_reminders(snapshot, db, settings)  # Fix 3: reminder
+
+            # Tracked-cases serial alerts
+            try:
+                from ..services.alert_checker import check_serial_alerts
+
+                check_serial_alerts(db, list(snapshot.values()))
+            except Exception as _ac_exc:
+                log.warning("check_serial_alerts failed: %s", _ac_exc)
 
         except KeyboardInterrupt:
             raise

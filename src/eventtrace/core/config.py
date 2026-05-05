@@ -6,6 +6,7 @@ from pathlib import Path
 # Auto-load .env from project root (non-fatal if missing or dotenv not installed)
 try:
     from dotenv import load_dotenv
+
     load_dotenv(Path(__file__).parent.parent.parent.parent / ".env", override=False)
 except ImportError:
     pass
@@ -43,16 +44,18 @@ class Settings:
         headless: bool | None = None,
         telegram_token: str | None = None,
     ) -> None:
-        self.url = url or _get_env("CHD_URL", "https://display.calcuttahighcourt.gov.in/principal.php")
+        self.url = url or _get_env(
+            "CHD_URL", "https://display.calcuttahighcourt.gov.in/principal.php"
+        )
         self.table_selector = table_selector or _get_env("CHD_TABLE_SELECTOR", "table")
         if key_fields is None:
             key_fields = tuple(
-                f.strip()
-                for f in _get_env("CHD_KEY_FIELDS", "court_no").split(",")
-                if f.strip()
+                f.strip() for f in _get_env("CHD_KEY_FIELDS", "court_no").split(",") if f.strip()
             )
         self.key_fields = key_fields
-        self.poll_seconds = poll_seconds if poll_seconds is not None else _get_env_int("CHD_POLL_SECONDS", 15)
+        self.poll_seconds = (
+            poll_seconds if poll_seconds is not None else _get_env_int("CHD_POLL_SECONDS", 15)
+        )
         self.db_path = db_path or _get_env("CHD_DB_PATH", "./data/eventtrace.sqlite3")
         self.storage_state_path = storage_state_path or _get_env(
             "CHD_STORAGE_STATE_PATH", "./.state/storage_state.json"
@@ -77,8 +80,18 @@ class Settings:
         self.msg91_template_id = _get_env("MSG91_TEMPLATE_ID", "")
         # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
         self.jwt_secret = _get_env("JWT_SECRET", "change-me-in-production")
-        if self.jwt_secret == "change-me-in-production" and self.msg91_auth_key:
-            raise RuntimeError(
-                "JWT_SECRET must be set in production (MSG91_AUTH_KEY is set but JWT_SECRET is default). "
-                "Run: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
+        _default_secret = "change-me-in-production"
+        _is_prod = bool(self.database_url or self.msg91_auth_key)
+        if self.jwt_secret == _default_secret:
+            if _is_prod:
+                raise RuntimeError(
+                    "JWT_SECRET must be set in production. "
+                    'Run: python -c "import secrets; print(secrets.token_hex(32))" '
+                    "and set JWT_SECRET in your environment."
+                )
+            else:
+                import logging as _log
+
+                _log.getLogger(__name__).warning(
+                    "WARNING: Using default JWT_SECRET — set this in production."
+                )

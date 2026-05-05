@@ -10,8 +10,19 @@ from .repositories.auth import SQLiteAuthRepository
 from .repositories.causelist import SQLiteCauselistRepository
 from .repositories.events import SQLiteEventsRepository
 from .repositories.subscriptions import SQLiteSubscriptionsRepository
+from .repositories.timeline import SQLiteTimelineRepository
 
 log = logging.getLogger(__name__)
+
+
+def _default_prefs() -> dict:
+    return {
+        "whatsapp": True,
+        "email": True,
+        "serial_alerts": True,
+        "causelist_alerts": True,
+        "change_alerts": True,
+    }
 
 
 class DB:
@@ -21,6 +32,7 @@ class DB:
         self._subscriptions = SQLiteSubscriptionsRepository(self.connect)
         self._causelist = SQLiteCauselistRepository(self.connect)
         self._auth = SQLiteAuthRepository(self.connect)
+        self._timeline = SQLiteTimelineRepository(self.connect)
 
     def connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path)
@@ -34,9 +46,7 @@ class DB:
             # Lightweight migration: rename legacy `change_history` -> `event_trace`
             existing_tables = {
                 r["name"]
-                for r in con.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
+                for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             }
             if "change_history" in existing_tables and "event_trace" not in existing_tables:
                 con.execute("ALTER TABLE change_history RENAME TO event_trace;")
@@ -220,6 +230,38 @@ class DB:
                 """
             )
 
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS case_snapshots (
+                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                  case_ref   TEXT NOT NULL,
+                  list_date  TEXT NOT NULL,
+                  data_json  TEXT NOT NULL,
+                  hash       TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  UNIQUE(case_ref, list_date)
+                );
+                CREATE INDEX IF NOT EXISTS idx_case_snapshots_ref
+                  ON case_snapshots(case_ref);
+                CREATE INDEX IF NOT EXISTS idx_case_snapshots_date
+                  ON case_snapshots(list_date);
+
+                CREATE TABLE IF NOT EXISTS case_timeline_events (
+                  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  case_ref       TEXT NOT NULL,
+                  event_type     TEXT NOT NULL,
+                  event_date     TEXT NOT NULL,
+                  change_summary TEXT,
+                  created_at     TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_cte_user_ref
+                  ON case_timeline_events(user_id, case_ref);
+                CREATE INDEX IF NOT EXISTS idx_cte_event_date
+                  ON case_timeline_events(event_date);
+                """
+            )
+
             # Non-destructive column migrations — safe to re-run
             for _col_sql in [
                 # causelist_bench: source tracking
@@ -232,6 +274,13 @@ class DB:
                 "ALTER TABLE subscriptions ADD COLUMN phone TEXT",
                 "ALTER TABLE subscriptions ADD COLUMN alerted_at TEXT",
                 "ALTER TABLE subscriptions ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0",
+                # tracked_cases: serial-alert deduplication
+                "ALTER TABLE tracked_cases ADD COLUMN alerted_at TEXT",
+                # users: notification preferences
+                "ALTER TABLE users ADD COLUMN notification_prefs TEXT",
+                # notification_log: enrich for tracked-case alerts
+                "ALTER TABLE notification_log ADD COLUMN tracked_case_id INTEGER",
+                "ALTER TABLE notification_log ADD COLUMN status TEXT NOT NULL DEFAULT 'sent'",
             ]:
                 try:
                     con.execute(_col_sql)
@@ -397,8 +446,17 @@ class DB:
     def get_field_state(self, court_id: str, field_name: str):
         return self._events.get_field_state(court_id, field_name)
 
-    def upsert_field_state(self, court_id: str, field_name: str, value: str | None, start_time: datetime, last_seen_time: datetime) -> None:
-        return self._events.upsert_field_state(court_id, field_name, value, start_time, last_seen_time)
+    def upsert_field_state(
+        self,
+        court_id: str,
+        field_name: str,
+        value: str | None,
+        start_time: datetime,
+        last_seen_time: datetime,
+    ) -> None:
+        return self._events.upsert_field_state(
+            court_id, field_name, value, start_time, last_seen_time
+        )
 
     def touch_field_state(self, court_id: str, field_name: str, last_seen_time: datetime) -> None:
         return self._events.touch_field_state(court_id, field_name, last_seen_time)
@@ -412,7 +470,9 @@ class DB:
     def list_current_state(self) -> list[dict[str, Any]]:
         return self._events.list_current_state()
 
-    def list_event_traces(self, limit: int = 200, court_id: str | None = None) -> list[dict[str, Any]]:
+    def list_event_traces(
+        self, limit: int = 200, court_id: str | None = None
+    ) -> list[dict[str, Any]]:
         return self._events.list_event_traces(limit=limit, court_id=court_id)
 
     def list_changes(self, limit: int = 200, court_id: str | None = None) -> list[dict[str, Any]]:
@@ -445,7 +505,9 @@ class DB:
     def get_monitor_state(self, key: str) -> str | None:
         return self._events.get_monitor_state(key)
 
-    def upsert_vc_zoom_link(self, date: str, room_no: str, zoom_url: str, scraped_at: datetime) -> None:
+    def upsert_vc_zoom_link(
+        self, date: str, room_no: str, zoom_url: str, scraped_at: datetime
+    ) -> None:
         return self._events.upsert_vc_zoom_link(date, room_no, zoom_url, scraped_at)
 
     def get_vc_zoom_links(self, date: str) -> dict[str, str]:
@@ -456,8 +518,27 @@ class DB:
 
     # ── Subscriptions delegation ─────────────────────────────────────────────
 
-    def add_subscription(self, telegram_id: str, room_no: str, target_serial: int, look_ahead: int, hearing_date: str | None = None, contact_type: str = "telegram", display_name: str | None = None, phone: str | None = None) -> int:
-        return self._subscriptions.add_subscription(telegram_id, room_no, target_serial, look_ahead, hearing_date, contact_type, display_name, phone)
+    def add_subscription(
+        self,
+        telegram_id: str,
+        room_no: str,
+        target_serial: int,
+        look_ahead: int,
+        hearing_date: str | None = None,
+        contact_type: str = "telegram",
+        display_name: str | None = None,
+        phone: str | None = None,
+    ) -> int:
+        return self._subscriptions.add_subscription(
+            telegram_id,
+            room_no,
+            target_serial,
+            look_ahead,
+            hearing_date,
+            contact_type,
+            display_name,
+            phone,
+        )
 
     def remove_subscription(self, telegram_id: str, room_no: str) -> None:
         return self._subscriptions.remove_subscription(telegram_id, room_no)
@@ -494,20 +575,53 @@ class DB:
 
     # ── Causelist delegation ─────────────────────────────────────────────────
 
-    def get_causelist_bench(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> dict[str, Any] | None:
-        return self._causelist.get_causelist_bench(list_date, court_no, side=side, list_type=list_type)
+    def get_causelist_bench(
+        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None
+    ) -> dict[str, Any] | None:
+        return self._causelist.get_causelist_bench(
+            list_date, court_no, side=side, list_type=list_type
+        )
 
-    def list_causelist_benches(self, list_date: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
+    def list_causelist_benches(
+        self, list_date: str, side: str | None = None, list_type: str | None = None
+    ) -> list[dict[str, Any]]:
         return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type)
 
-    def list_causelist_cases(self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_cases(list_date, court_no, side=side, list_type=list_type)
+    def list_causelist_cases(
+        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._causelist.list_causelist_cases(
+            list_date, court_no, side=side, list_type=list_type
+        )
 
-    def get_causelist_case_by_serial(self, list_date: str, court_no: str, serial_no: int) -> dict[str, Any] | None:
+    def get_causelist_case_by_serial(
+        self, list_date: str, court_no: str, serial_no: int
+    ) -> dict[str, Any] | None:
         return self._causelist.get_causelist_case_by_serial(list_date, court_no, serial_no)
 
-    def search_causelist_cases(self, case_ref: str | None = None, advocate: str | None = None, party: str | None = None, judge: str | None = None, date_from: str | None = None, date_to: str | None = None, side: str | None = None, list_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._causelist.search_causelist_cases(case_ref, advocate, party, judge, date_from, date_to, side=side, list_type=list_type, limit=limit)
+    def search_causelist_cases(
+        self,
+        case_ref: str | None = None,
+        advocate: str | None = None,
+        party: str | None = None,
+        judge: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        side: str | None = None,
+        list_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return self._causelist.search_causelist_cases(
+            case_ref,
+            advocate,
+            party,
+            judge,
+            date_from,
+            date_to,
+            side=side,
+            list_type=list_type,
+            limit=limit,
+        )
 
     def list_causelist_dates(self) -> list[str]:
         return self._causelist.list_causelist_dates()
@@ -518,7 +632,9 @@ class DB:
     def list_causelist_prefixes(self) -> list[str]:
         return self._causelist.list_causelist_prefixes()
 
-    def store_causelist(self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None) -> int:
+    def store_causelist(
+        self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None
+    ) -> int:
         return self._causelist.store_causelist(parsed, scraped_at)
 
     # ── Auth delegation ──────────────────────────────────────────────────────
@@ -592,7 +708,25 @@ class DB:
     def list_tracked_cases(self, user_id: str) -> list[dict]:
         with self.connect() as con:
             rows = con.execute(
-                "SELECT * FROM tracked_cases WHERE user_id=? ORDER BY added_at DESC",
+                """
+                SELECT
+                  tc.*,
+                  (SELECT MAX(cc.list_date)
+                     FROM causelist_case cc
+                    WHERE cc.case_ref = tc.case_ref) AS last_seen_date,
+                  (SELECT cc.court_no
+                     FROM causelist_case cc
+                    WHERE cc.case_ref = tc.case_ref
+                    ORDER BY cc.list_date DESC
+                    LIMIT 1) AS last_seen_court,
+                  (SELECT MIN(cc.list_date)
+                     FROM causelist_case cc
+                    WHERE cc.case_ref = tc.case_ref
+                      AND cc.list_date > date('now')) AS next_hearing_date
+                FROM tracked_cases tc
+                WHERE tc.user_id = ?
+                ORDER BY tc.added_at DESC
+                """,
                 (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -613,7 +747,9 @@ class DB:
             )
             return cur.rowcount > 0
 
-    def set_case_alert(self, user_id: str, case_ref: str, alert_serial: int, look_ahead: int) -> bool:
+    def set_case_alert(
+        self, user_id: str, case_ref: str, alert_serial: int, look_ahead: int
+    ) -> bool:
         with self.connect() as con:
             cur = con.execute(
                 """
@@ -632,3 +768,94 @@ class DB:
                 (user_id, case_ref),
             )
             return cur.rowcount > 0
+
+    def list_active_case_alerts(self, court_no: str, today: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT * FROM tracked_cases
+                WHERE court_no=?
+                  AND alert_active=1
+                  AND alert_serial IS NOT NULL
+                  AND (alerted_at IS NULL OR alerted_at < ?)
+                """,
+                (court_no, today),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_case_alerted_at(self, user_id: str, case_ref: str, alerted_at: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE tracked_cases SET alerted_at=? WHERE user_id=? AND case_ref=?",
+                (alerted_at, user_id, case_ref),
+            )
+
+    def log_case_notification(
+        self, tracked_case_id: int, payload: str, status: str = "sent"
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO notification_log (tracked_case_id, sent_at, payload, status)
+                VALUES (?, ?, ?, ?)
+                """,
+                (tracked_case_id, now, payload, status),
+            )
+
+    def get_notification_prefs(self, user_id: str) -> dict:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT notification_prefs FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+        if not row or not row["notification_prefs"]:
+            return _default_prefs()
+        import json
+
+        try:
+            return {**_default_prefs(), **json.loads(row["notification_prefs"])}
+        except Exception:
+            return _default_prefs()
+
+    def update_notification_prefs(self, user_id: str, prefs: dict) -> dict:
+        import json
+
+        with self.connect() as con:
+            con.execute(
+                "UPDATE users SET notification_prefs=? WHERE id=?",
+                (json.dumps(prefs), user_id),
+            )
+        return prefs
+
+    # ── Timeline delegation ───────────────────────────────────────────────────
+
+    def upsert_snapshot(self, case_ref: str, list_date: str, data_json: str, hash_val: str) -> bool:
+        return self._timeline.upsert_snapshot(case_ref, list_date, data_json, hash_val)
+
+    def get_last_snapshot(self, case_ref: str) -> dict | None:
+        return self._timeline.get_last_snapshot(case_ref)
+
+    def insert_timeline_event(
+        self,
+        user_id: str,
+        case_ref: str,
+        event_type: str,
+        event_date: str,
+        change_summary: str | None = None,
+    ) -> None:
+        return self._timeline.insert_timeline_event(
+            user_id, case_ref, event_type, event_date, change_summary
+        )
+
+    def get_timeline(self, user_id: str, case_ref: str, limit: int = 50) -> list[dict]:
+        return self._timeline.get_timeline(user_id, case_ref, limit)
+
+    def get_all_tracked_case_refs(self) -> list[str]:
+        return self._timeline.get_all_tracked_case_refs()
+
+    def get_users_tracking(self, case_ref: str) -> list[str]:
+        return self._timeline.get_users_tracking(case_ref)
+
+    def has_causelist_alert_today(self, user_id: str, case_ref: str, event_date: str) -> bool:
+        return self._timeline.has_causelist_alert_today(user_id, case_ref, event_date)

@@ -15,7 +15,7 @@ from .routes.display import router as display_router
 from .routes.export import router as export_router
 from .routes.health import router as health_router
 from .routes.history import router as history_router
-from .routes.my_cases import router as my_cases_router
+from .routes.my_cases import router as my_cases_router, timeline_router
 from .routes.ui import router as ui_router
 from .routes.webhooks import router as webhooks_router
 
@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(causelist_router)
     app.include_router(auth_router)
     app.include_router(my_cases_router)
+    app.include_router(timeline_router)
     app.include_router(ui_router)
 
     return app
@@ -70,5 +71,6 @@ def main() -> None:
     port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()
     reload_enabled = reload_env in {"1", "true", "yes", "on"}
-    uvicorn.run("eventtrace.api:create_app", host=host, port=port, factory=True, reload=reload_enabled)
-
+    uvicorn.run(
+        "eventtrace.api:create_app", host=host, port=port, factory=True, reload=reload_enabled
+    )

@@ -9,6 +9,7 @@ Date logic: court publishes the *next working day's* list each evening.
   Friday evening  → Monday (skip weekend)
   Weekend evening → Monday
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,7 +54,9 @@ def _next_working_day(from_date: date) -> date:
     return d
 
 
-def _source_already_scraped(db: Any, for_date: date, source_id: str, schedule: str = "daily") -> bool:
+def _source_already_scraped(
+    db: Any, for_date: date, source_id: str, schedule: str = "daily"
+) -> bool:
     """True if this source already has data for the relevant period."""
     try:
         if schedule == "monthly":
@@ -87,6 +90,7 @@ def _telegram_alert(settings: Any, message: str) -> None:
         return
     try:
         import httpx
+
         httpx.post(
             f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage",
             json={"chat_id": admin_chat_id, "text": f"[EventTrace] {message}"},
@@ -111,13 +115,30 @@ def _attempt_all_sources(
         result = source.fetch(target_date)
         if result.ok:
             n = _store_result(db, result)
-            log.info("[%s] stored %d cases (%d courts) for %s",
-                     source.source_id, n, len(result.courts), target_date)
+            log.info(
+                "[%s] stored %d cases (%d courts) for %s",
+                source.source_id,
+                n,
+                len(result.courts),
+                target_date,
+            )
             succeeded.add(source.source_id)
+            _run_case_diff_jobs(db, target_date.isoformat())
         else:
-            log.warning("[%s] no data for %s: %s",
-                        source.source_id, target_date, result.error or "empty")
+            log.warning(
+                "[%s] no data for %s: %s", source.source_id, target_date, result.error or "empty"
+            )
     return succeeded
+
+
+def _run_case_diff_jobs(db: Any, date_str: str) -> None:
+    try:
+        from ..services.case_diff import run_daily_case_diff, run_causelist_alert_scan
+
+        run_daily_case_diff(db, date_str)
+        run_causelist_alert_scan(db, date_str)
+    except Exception as exc:
+        log.warning("case_diff jobs failed for %s: %s", date_str, exc)
 
 
 def _sleep_until_tomorrow(settings: Any, failed_ids: set[str], target_date: date) -> None:
@@ -151,10 +172,13 @@ def run_scheduler(settings: Any, db: Any) -> None:
         # Compute which sources still need scraping for target_date.
         # Skip sources whose schedule doesn't apply (monthly only in first week).
         pending = {
-            s.source_id for s in sources
+            s.source_id
+            for s in sources
             if s.should_run_for(target_date)
             and not _source_already_scraped(
-                db, target_date, s.source_id,
+                db,
+                target_date,
+                s.source_id,
                 schedule=getattr(getattr(s, "_cfg", None), "schedule", "daily"),
             )
         }
@@ -194,7 +218,10 @@ def run_scheduler(settings: Any, db: Any) -> None:
             secs = max(60.0, secs)
             log.info(
                 "%d source(s) still pending. Next attempt at %s IST (%.0f min): %s",
-                len(pending), next_w, secs / 60, sorted(pending),
+                len(pending),
+                next_w,
+                secs / 60,
+                sorted(pending),
             )
             time.sleep(secs)
 

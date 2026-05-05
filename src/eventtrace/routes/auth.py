@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 
 from ..schemas.auth import SendOTPRequest, UpdateProfileRequest, VerifyOTPRequest
 from ..services import auth as auth_svc
@@ -29,7 +30,9 @@ def _current_user(
 
 
 @router.post("/send-otp")
-def send_otp(req: SendOTPRequest, db: Any = Depends(get_db), settings=Depends(get_settings)) -> dict:
+def send_otp(
+    req: SendOTPRequest, db: Any = Depends(get_db), settings=Depends(get_settings)
+) -> dict:
     phone = req.phone
     existing = db.get_latest_otp(phone)
     if auth_svc.otp_rate_limited(existing):
@@ -51,7 +54,9 @@ def send_otp(req: SendOTPRequest, db: Any = Depends(get_db), settings=Depends(ge
 
 
 @router.post("/verify-otp")
-def verify_otp(req: VerifyOTPRequest, db: Any = Depends(get_db), settings=Depends(get_settings)) -> dict:
+def verify_otp(
+    req: VerifyOTPRequest, db: Any = Depends(get_db), settings=Depends(get_settings)
+) -> dict:
     phone = req.phone
     record = db.get_latest_otp(phone)
     if not record:
@@ -91,3 +96,30 @@ def update_me(
         raise HTTPException(status_code=404, detail="User not found")
     return updated
 
+
+class NotificationPrefsUpdate(BaseModel):
+    whatsapp: bool | None = None
+    email: bool | None = None
+    serial_alerts: bool | None = None
+    causelist_alerts: bool | None = None
+    change_alerts: bool | None = None
+
+
+@router.get("/notification-settings")
+def get_notification_settings(
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    return db.get_notification_prefs(current_user["id"])
+
+
+@router.patch("/notification-settings")
+def update_notification_settings(
+    body: NotificationPrefsUpdate,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    current = db.get_notification_prefs(current_user["id"])
+    updates = body.model_dump(exclude_none=True)
+    merged = {**current, **updates}
+    return db.update_notification_prefs(current_user["id"], merged)
