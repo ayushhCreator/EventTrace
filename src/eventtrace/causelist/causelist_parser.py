@@ -5,6 +5,7 @@ Fetches HTML from:
 
 Returns structured dicts suitable for DB upsert.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 
 # ── URL ──────────────────────────────────────────────────────────────────────
 
+
 def causelist_url(for_date: date) -> str:
     return (
         f"https://calcuttahighcourt.gov.in/downloads/old_cause_lists/AS/"
@@ -27,9 +29,8 @@ def causelist_url(for_date: date) -> str:
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
-def fetch_causelist_html(
-    for_date: date, timeout: int = 120, url: str | None = None
-) -> str | None:
+
+def fetch_causelist_html(for_date: date, timeout: int = 120, url: str | None = None) -> str | None:
     """Fetch causelist HTML via urllib3 (fast, handles CHC legacy TLS).
 
     Static HTML files on HC server — 404 means file doesn't exist, no
@@ -59,7 +60,8 @@ def _fetch_urllib3(url: str, timeout: int) -> str | None:
     t = Timeout(connect=15, read=timeout)
     try:
         resp = http.request(
-            "GET", url,
+            "GET",
+            url,
             timeout=t,
             headers={"User-Agent": "Mozilla/5.0"},
             redirect=True,
@@ -136,21 +138,31 @@ def split_court_blocks(text: str) -> list[str]:
 
 # ── Regexes for header parsing ────────────────────────────────────────────────
 
-_COURT_NO_RE    = re.compile(r"COURT\s+NO[\.\s:]*\s*(\S+)", re.IGNORECASE)
-_JUDGE_RE       = re.compile(
+_COURT_NO_RE = re.compile(r"COURT\s+NO[\.\s:]*\s*(\S+)", re.IGNORECASE)
+_JUDGE_RE = re.compile(
     r"HON['’]?BLE\s+((?:CHIEF\s+)?(?:DR\.\s+)?JUSTICE\s+[A-Z][A-Z\s\.]+?)(?=\n|HON|$)",
     re.IGNORECASE,
 )
-_BENCH_RE       = re.compile(r"((?:DIVISION|SINGLE)\s+BENCH(?:\s*\([^)]+\))?)", re.IGNORECASE)
-_SIDE_RE        = re.compile(r"(APPELLATE\s+SIDE|ORIGINAL\s+SIDE)", re.IGNORECASE)
-_LIST_TYPE_RE   = re.compile(r"(DAILY|MONTHLY|SUPPLEMENTARY|SPECIAL)\s+CAUSELIST", re.IGNORECASE)
-_DATE_RE        = re.compile(r"For\s+\w+\s+The\s+(\d+(?:st|nd|rd|th)?)\s+(\w+)\s+(\d{4})", re.IGNORECASE)
+_BENCH_RE = re.compile(r"((?:DIVISION|SINGLE)\s+BENCH(?:\s*\([^)]+\))?)", re.IGNORECASE)
+_SIDE_RE = re.compile(r"(APPELLATE\s+SIDE|ORIGINAL\s+SIDE)", re.IGNORECASE)
+_LIST_TYPE_RE = re.compile(r"(DAILY|MONTHLY|SUPPLEMENTARY|SPECIAL)\s+CAUSELIST", re.IGNORECASE)
+_DATE_RE = re.compile(r"For\s+\w+\s+The\s+(\d+(?:st|nd|rd|th)?)\s+(\w+)\s+(\d{4})", re.IGNORECASE)
 _NOT_SITTING_RE = re.compile(r"NOT\s+SITTING\s+ON\s+([\d\.]+)", re.IGNORECASE)
-_VC_LINK_RE     = re.compile(r"VC\s+LINK\s*:\s*(https?://\S+)", re.IGNORECASE)
+_VC_LINK_RE = re.compile(r"VC\s+LINK\s*:\s*(https?://\S+)", re.IGNORECASE)
 
 _MONTHS = {
-    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
-    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
 }
 
 
@@ -214,50 +226,60 @@ def parse_court_header(block: str) -> dict[str, Any]:
     clean_block = block.replace("\xa0", " ")
     judges = [_clean(m.group(1)) for m in _JUDGE_RE.finditer(clean_block) if m.group(1).strip()]
     return {
-        "court_no":           _first_group(_COURT_NO_RE, clean_block),
-        "bench_label":        _clean(_first_group(_BENCH_RE, clean_block, 1)),
-        "side":               _canonical_side(_first_group(_SIDE_RE, clean_block, 0)),
-        "list_type":          (_first_group(_LIST_TYPE_RE, clean_block, 1) or "").upper() or None,
-        "list_date":          _parse_date_from_block(clean_block),
-        "judges":             judges,
-        "not_sitting":        bool(_NOT_SITTING_RE.search(clean_block)),
-        "vc_link":            _first_group(_VC_LINK_RE, clean_block),
+        "court_no": _first_group(_COURT_NO_RE, clean_block),
+        "bench_label": _clean(_first_group(_BENCH_RE, clean_block, 1)),
+        "side": _canonical_side(_first_group(_SIDE_RE, clean_block, 0)),
+        "list_type": (_first_group(_LIST_TYPE_RE, clean_block, 1) or "").upper() or None,
+        "list_date": _parse_date_from_block(clean_block),
+        "judges": judges,
+        "not_sitting": bool(_NOT_SITTING_RE.search(clean_block)),
+        "vc_link": _first_group(_VC_LINK_RE, clean_block),
         "jurisdiction_notes": _extract_jurisdiction(clean_block),
     }
 
 
 # ── Case parsing ──────────────────────────────────────────────────────────────
 
-_SERIAL_RE   = re.compile(r"^\d+$")
+_SERIAL_RE = re.compile(r"^\d+$")
 _CASE_REF_RE = re.compile(r"^([A-Z][A-Z\.\(\)]*(?:\([A-Z\(\)]+\))?)\s*/\s*(\d+)\s*/\s*(\d{4})\s*$")
-_IA_RE       = re.compile(r"^IA\s+NO\s*:\s*([A-Z]+(?:\([A-Z]+\))?/\d+/\d{4})", re.IGNORECASE)
-_SUBSEC_RE   = re.compile(r"^\(([A-Z][A-Z\s\-IX/&\.]+)\)\s*$")
+_IA_RE = re.compile(r"^IA\s+NO\s*:\s*([A-Z]+(?:\([A-Z]+\))?/\d+/\d{4})", re.IGNORECASE)
+_SUBSEC_RE = re.compile(r"^\(([A-Z][A-Z\s\-IX/&\.]+)\)\s*$")
 # All-caps line = section header candidate
 _ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z\s\-\(\)/&\.0-9]+$")
 
 _CASE_TYPE_NORM: dict[str, str] = {
-    "W.P.A.": "WPA", "WPA": "WPA", "WP.CT": "WP.CT",
-    "W.P.(C)": "WPC", "WPC": "WPC",
-    "M.A.T.": "MAT", "MAT": "MAT",
-    "C.A.N.": "CAN", "CAN": "CAN",
-    "C.O.":   "CO",  "CO":  "CO",
-    "F.A.":   "FA",  "FA":  "FA",
-    "A.P.O.": "APO", "APO": "APO",
-    "C.S.":   "CS",  "CS":  "CS",
-    "C.P.":   "CP",  "CP":  "CP",
+    "W.P.A.": "WPA",
+    "WPA": "WPA",
+    "WP.CT": "WP.CT",
+    "W.P.(C)": "WPC",
+    "WPC": "WPC",
+    "M.A.T.": "MAT",
+    "MAT": "MAT",
+    "C.A.N.": "CAN",
+    "CAN": "CAN",
+    "C.O.": "CO",
+    "CO": "CO",
+    "F.A.": "FA",
+    "FA": "FA",
+    "A.P.O.": "APO",
+    "APO": "APO",
+    "C.S.": "CS",
+    "CS": "CS",
+    "C.P.": "CP",
+    "CP": "CP",
 }
 
 _SECTION_TAGS: dict[str, str] = {
     "POLICE INACTION": "GROUP_IX",
-    "GROUP - IX":      "GROUP_IX",
-    "PIL":             "PIL",
+    "GROUP - IX": "GROUP_IX",
+    "PIL": "PIL",
     "PUBLIC INTEREST LITIGATION": "PIL",
     "TRIBUNAL MOTION": "TRIBUNAL",
     "TRIBUNAL HEARING": "TRIBUNAL",
-    "WP.CT":           "TRIBUNAL",
-    "GROUP - VI":      "GROUP_VI",
-    "CONTEMPT":        "CONTEMPT",
-    "REVIEW":          "REVIEW",
+    "WP.CT": "TRIBUNAL",
+    "GROUP - VI": "GROUP_VI",
+    "CONTEMPT": "CONTEMPT",
+    "REVIEW": "REVIEW",
 }
 
 _HEARING_KEYWORDS = ["MOTION", "HEARING", "APPEAL"]
@@ -289,10 +311,10 @@ def _normalize_advocate(raw: str | None) -> str | None:
 
 
 def _classify_section(section: str | None, subsection: str | None) -> tuple[str | None, str | None]:
-    s   = (section or "").upper()
+    s = (section or "").upper()
     sub = (subsection or "").upper()
     category = next((v for k, v in _SECTION_TAGS.items() if k in s), section)
-    h_type   = next((k for k in _HEARING_KEYWORDS if k in s or k in sub), None)
+    h_type = next((k for k in _HEARING_KEYWORDS if k in s or k in sub), None)
     return category, h_type
 
 
@@ -336,22 +358,24 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             return
 
         cat, h_type = _classify_section(current_section, current_subsection)
-        cases.append({
-            "serial_no":    serial,
-            "case_ref":     case_ref,
-            "case_type":    case_type,
-            "case_number":  case_number,
-            "case_year":    case_year,
-            "petitioner":   _normalize_party(" ".join(pet_parts)) if pet_parts else None,
-            "respondent":   _normalize_party(respondent),
-            "advocate":     _normalize_advocate(advocate),
-            "pro_se":       pro_se,
-            "ia_numbers":   list(ia_numbers),
-            "section":      cat,
-            "subsection":   current_subsection,
-            "hearing_type": h_type,
-            "raw_text":     "\n".join(raw_lines),
-        })
+        cases.append(
+            {
+                "serial_no": serial,
+                "case_ref": case_ref,
+                "case_type": case_type,
+                "case_number": case_number,
+                "case_year": case_year,
+                "petitioner": _normalize_party(" ".join(pet_parts)) if pet_parts else None,
+                "respondent": _normalize_party(respondent),
+                "advocate": _normalize_advocate(advocate),
+                "pro_se": pro_se,
+                "ia_numbers": list(ia_numbers),
+                "section": cat,
+                "subsection": current_subsection,
+                "hearing_type": h_type,
+                "raw_text": "\n".join(raw_lines),
+            }
+        )
         serial = case_ref = case_type = case_number = case_year = None
         pet_parts = []
         ia_numbers = []
@@ -402,10 +426,10 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
         if case_ref is None:
             cr_m = _CASE_REF_RE.match(line)
             if cr_m:
-                case_type   = _normalize_case_type(cr_m.group(1))
+                case_type = _normalize_case_type(cr_m.group(1))
                 case_number = cr_m.group(2).lstrip("0") or cr_m.group(2)
-                case_year   = int(cr_m.group(3))
-                case_ref    = f"{case_type}/{case_number}/{case_year}"
+                case_year = int(cr_m.group(3))
+                case_ref = f"{case_type}/{case_number}/{case_year}"
                 raw_lines.append(line)
                 i += 1
                 continue
@@ -455,6 +479,7 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
 
 # ── Top-level parse ───────────────────────────────────────────────────────────
 
+
 def parse_causelist(html: str, for_date: date | None = None) -> list[dict[str, Any]]:
     """Parse full causelist HTML. Returns list of court dicts each with 'bench' + 'cases'."""
     text = html_to_text(html)
@@ -473,16 +498,21 @@ def parse_causelist(html: str, for_date: date | None = None) -> list[dict[str, A
 
 # ── DB upsert helpers ─────────────────────────────────────────────────────────
 
-def upsert_causelist(parsed: list[dict[str, Any]], db: Any, scraped_at: datetime | None = None) -> int:
+
+def upsert_causelist(
+    parsed: list[dict[str, Any]], db: Any, scraped_at: datetime | None = None
+) -> int:
     """Write parsed causelist to DB. Delegates to db.store_causelist()."""
     return db.store_causelist(parsed, scraped_at=scraped_at)
 
 
 # ── CLI entry ─────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     """CLI: chd-scrape-causelist [YYYY-MM-DD] [--store]"""
     import sys
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     from datetime import timedelta
@@ -517,6 +547,7 @@ def main() -> None:
     if store:
         settings = Settings()
         from ..db import get_db
+
         db = get_db(settings)
         db.ensure_schema()
         n = db.store_causelist(parsed)

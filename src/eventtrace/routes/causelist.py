@@ -38,7 +38,9 @@ def causelist_search(
     db: Any = Depends(get_db),
 ) -> list[dict]:
     if not any([case_ref, advocate, party, judge]):
-        raise HTTPException(status_code=422, detail="Provide at least one of: case_ref, advocate, party, judge")
+        raise HTTPException(
+            status_code=422, detail="Provide at least one of: case_ref, advocate, party, judge"
+        )
     return db.search_causelist_cases(
         case_ref=case_ref,
         advocate=advocate,
@@ -66,7 +68,8 @@ def causelist_summary(
 
 @router.get("/{list_date}/court/{court_no}")
 def causelist_court(
-    list_date: str, court_no: str,
+    list_date: str,
+    court_no: str,
     side: str | None = Query(None),
     list_type: str | None = Query(None),
     db: Any = Depends(get_db),
@@ -81,11 +84,12 @@ def causelist_court(
 
 
 @router.get("/{list_date}/court/{court_no}/serial/{serial_no}")
-def causelist_serial(list_date: str, court_no: str, serial_no: int, db: Any = Depends(get_db)) -> dict:
+def causelist_serial(
+    list_date: str, court_no: str, serial_no: int, db: Any = Depends(get_db)
+) -> dict:
     if not _DATE_RE.match(list_date):
         raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
     row = db.get_causelist_case_by_serial(list_date, court_no, serial_no)
     if not row:
         raise HTTPException(status_code=404, detail="Case not found")
     return row
-

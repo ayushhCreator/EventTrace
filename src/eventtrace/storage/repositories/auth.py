@@ -1,4 +1,5 @@
 """Repositories for auth tables: users, phone_otps."""
+
 from __future__ import annotations
 
 import uuid

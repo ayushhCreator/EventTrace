@@ -16,7 +16,9 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @router.post("/alert", status_code=201)
-def create_alert(req: AlertRequest, x_api_key: str | None = Header(default=None), db: Any = Depends(get_db)) -> dict:
+def create_alert(
+    req: AlertRequest, x_api_key: str | None = Header(default=None), db: Any = Depends(get_db)
+) -> dict:
     alert_api_key = os.getenv("CHD_ALERT_API_KEY", "")
     if alert_api_key and x_api_key != alert_api_key:
         raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key")
@@ -51,4 +53,3 @@ def create_alert(req: AlertRequest, x_api_key: str | None = Header(default=None)
         "contact_type": req.contact_type,
         "telegram_command": bot_cmd,
     }
-

@@ -13,6 +13,7 @@ _HEADERS = {
     "Referer": "https://display.calcuttahighcourt.gov.in/principal.php",
 }
 
+
 # Server uses legacy TLS renegotiation; Python 3.10+ disables it by default.
 def _ssl_ctx() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

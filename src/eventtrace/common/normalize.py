@@ -20,4 +20,3 @@ def normalize_row(row: dict[str, Any]) -> dict[str, str | None]:
     for k, v in row.items():
         out[normalize_header(str(k))] = normalize_cell(v)
     return out
-

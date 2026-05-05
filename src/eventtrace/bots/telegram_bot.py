@@ -11,6 +11,7 @@ Commands:
 Run:  chd-bot
 Env:  TELEGRAM_TOKEN=<bot_token>
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 
 
 # ── Notification helper (called from run_monitor) ────────────────────────────
+
 
 def send_notification_sync(token: str, telegram_id: str, payload: dict) -> None:
     """Blocking HTTP send — called from the monitor thread."""
@@ -55,6 +57,7 @@ def send_notification_sync(token: str, telegram_id: str, payload: dict) -> None:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _make_db(settings: Settings) -> DB:
     db = DB(settings.db_path)
@@ -105,6 +108,7 @@ def _all_rooms_summary(db: DB) -> list[dict]:
 
 
 # ── Command handlers ─────────────────────────────────────────────────────────
+
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     # Deep link from UI: /start watch_<room>_<serial>_<ahead>_<date>
@@ -164,7 +168,10 @@ async def _handle_deep_link_watch(
 
     db.remove_subscription(telegram_id, room_no)
     db.add_subscription(
-        telegram_id, room_no, target_serial, look_ahead,
+        telegram_id,
+        room_no,
+        target_serial,
+        look_ahead,
         hearing_date=hearing_date,
     )
     alert_at = target_serial - look_ahead
@@ -321,17 +328,23 @@ async def cmd_watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         target_serial = int(args[1])
         look_ahead = int(args[2]) if len(args) >= 3 else 5
     except ValueError:
-        await update.message.reply_text("Serial and alert\\_before must be numbers.\n\nExample: `/watch 8 45`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "Serial and alert\\_before must be numbers.\n\nExample: `/watch 8 45`",
+            parse_mode="Markdown",
+        )
         return
 
     if look_ahead < 0 or look_ahead > 50:
-        await update.message.reply_text("alert\\_before must be between 0 and 50.", parse_mode="Markdown")
+        await update.message.reply_text(
+            "alert\\_before must be between 0 and 50.", parse_mode="Markdown"
+        )
         return
 
     # Optional 4th arg: hearing date (YYYY-MM-DD)
     hearing_date = ist_today_str()
     if len(args) >= 4:
         import re
+
         date_arg = args[3]
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_arg):
             await update.message.reply_text(
@@ -360,7 +373,9 @@ async def cmd_watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if is_today and current is not None:
         lines.append(f"Current serial: *{current}*")
         if current >= alert_at:
-            lines.append("⚠️ _Serial already past alert threshold — you'll get notified on next poll._")
+            lines.append(
+                "⚠️ _Serial already past alert threshold — you'll get notified on next poll._"
+            )
     if is_today and room_no in vc_links:
         lines.append("📹 VC link available for today (sent with alert)")
     elif is_today:
@@ -419,6 +434,7 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ── Catch-all: redirect to WhatsApp ─────────────────────────────────────────
 
+
 async def cmd_redirect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "This bot is no longer active.\n\n"
@@ -429,6 +445,7 @@ async def cmd_redirect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     logging.basicConfig(
@@ -445,14 +462,14 @@ def main() -> None:
     app.bot_data["settings"] = settings
     app.bot_data["db"] = db
 
-    app.add_handler(CommandHandler("start",   cmd_redirect))
-    app.add_handler(CommandHandler("help",    cmd_redirect))
-    app.add_handler(CommandHandler("today",   cmd_redirect))
-    app.add_handler(CommandHandler("daily",   cmd_redirect))
-    app.add_handler(CommandHandler("status",  cmd_redirect))
-    app.add_handler(CommandHandler("watch",   cmd_redirect))
+    app.add_handler(CommandHandler("start", cmd_redirect))
+    app.add_handler(CommandHandler("help", cmd_redirect))
+    app.add_handler(CommandHandler("today", cmd_redirect))
+    app.add_handler(CommandHandler("daily", cmd_redirect))
+    app.add_handler(CommandHandler("status", cmd_redirect))
+    app.add_handler(CommandHandler("watch", cmd_redirect))
     app.add_handler(CommandHandler("unwatch", cmd_redirect))
-    app.add_handler(CommandHandler("list",    cmd_redirect))
+    app.add_handler(CommandHandler("list", cmd_redirect))
     app.add_handler(MessageHandler(filters.ALL, cmd_redirect))
 
     log.info("Eventtrace bot starting (polling)")

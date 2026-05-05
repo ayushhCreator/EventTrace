@@ -3,6 +3,7 @@
 Handles pages with <select> dropdowns for: Date / List Type / Court Type.
 Provide the base URL and dropdown selectors via config.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +20,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class DropdownConfig:
     """Selectors and option values for one (side, list_type) combination."""
+
     url: str
     side: str
     list_type: str
@@ -99,26 +101,32 @@ class DropdownSource(CauseListSource):
             context = await browser.new_context()
             page = await context.new_page()
             try:
-                await page.goto(self._cfg.url, wait_until="domcontentloaded",
-                                timeout=self._cfg.timeout_ms)
+                await page.goto(
+                    self._cfg.url, wait_until="domcontentloaded", timeout=self._cfg.timeout_ms
+                )
 
                 # Select court type
-                await self._select_option(page, self._cfg.court_type_selector,
-                                          self._cfg.court_type_value)
+                await self._select_option(
+                    page, self._cfg.court_type_selector, self._cfg.court_type_value
+                )
                 # Select list type
-                await self._select_option(page, self._cfg.list_type_selector,
-                                          self._cfg.list_type_value)
+                await self._select_option(
+                    page, self._cfg.list_type_selector, self._cfg.list_type_value
+                )
                 # Select date — try exact ISO match first, then formatted variants
                 date_value = await self._select_date(page, for_date)
                 if not date_value:
-                    log.info("[%s] date %s not in dropdown for %s",
-                             self.source_id, for_date, self._cfg.url)
+                    log.info(
+                        "[%s] date %s not in dropdown for %s",
+                        self.source_id,
+                        for_date,
+                        self._cfg.url,
+                    )
                     return []
 
                 if self._cfg.submit_selector:
                     await page.click(self._cfg.submit_selector)
-                    await page.wait_for_load_state("networkidle",
-                                                   timeout=self._cfg.timeout_ms)
+                    await page.wait_for_load_state("networkidle", timeout=self._cfg.timeout_ms)
 
                 html = await page.inner_html(self._cfg.content_selector)
                 if not html.strip():
@@ -137,25 +145,27 @@ class DropdownSource(CauseListSource):
     async def _select_option(self, page: Any, selector: str, value: str) -> None:
         """Select by value; silently skip if selector not found."""
         try:
-            await page.select_option(selector, value=value,
-                                     timeout=5_000)
+            await page.select_option(selector, value=value, timeout=5_000)
         except Exception:
-            log.debug("[%s] selector %r not found or value %r unavailable",
-                      self.source_id, selector, value)
+            log.debug(
+                "[%s] selector %r not found or value %r unavailable",
+                self.source_id,
+                selector,
+                value,
+            )
 
     async def _select_date(self, page: Any, for_date: date) -> str | None:
         """Try common date formats used in court dropdowns."""
         formats = [
-            for_date.isoformat(),                          # 2026-05-05
-            for_date.strftime("%d/%m/%Y"),                 # 05/05/2026
-            for_date.strftime("%d-%m-%Y"),                 # 05-05-2026
-            for_date.strftime("%d%m%Y"),                   # 05052026
-            for_date.strftime("%-d/%-m/%Y"),               # 5/5/2026
+            for_date.isoformat(),  # 2026-05-05
+            for_date.strftime("%d/%m/%Y"),  # 05/05/2026
+            for_date.strftime("%d-%m-%Y"),  # 05-05-2026
+            for_date.strftime("%d%m%Y"),  # 05052026
+            for_date.strftime("%-d/%-m/%Y"),  # 5/5/2026
         ]
         for fmt in formats:
             try:
-                await page.select_option(self._cfg.date_selector, value=fmt,
-                                         timeout=2_000)
+                await page.select_option(self._cfg.date_selector, value=fmt, timeout=2_000)
                 return fmt
             except Exception:
                 continue
@@ -168,8 +178,9 @@ class DropdownSource(CauseListSource):
             day_month = for_date.strftime("%d/%m") + f"/{for_date.year}"
             for opt in options:
                 if day_month in (opt.get("text") or "") or day_month in (opt.get("value") or ""):
-                    await page.select_option(self._cfg.date_selector,
-                                             value=opt["value"], timeout=2_000)
+                    await page.select_option(
+                        self._cfg.date_selector, value=opt["value"], timeout=2_000
+                    )
                     return opt["value"]
         except Exception:
             pass

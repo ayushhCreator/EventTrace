@@ -14,7 +14,9 @@ router = APIRouter()
 def export_current_state_csv(db: Any = Depends(get_db)):
     rows = db.list_current_state()
     if not rows:
-        return csv_response(rows=[], fieldnames=["court_id", "last_seen_time"], filename="current_state.csv")
+        return csv_response(
+            rows=[], fieldnames=["court_id", "last_seen_time"], filename="current_state.csv"
+        )
 
     all_keys: list[str] = []
     for r in rows:
@@ -50,4 +52,3 @@ def export_event_traces_csv(
         "observed_time",
     ]
     return csv_response(rows=rows, fieldnames=fieldnames, filename="event_traces.csv")
-

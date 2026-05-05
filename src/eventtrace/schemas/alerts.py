@@ -6,10 +6,12 @@ from ..services.validators import validate_yyyy_mm_dd
 
 try:  # Pydantic v2
     from pydantic import field_validator, model_validator
+
     _PYDANTIC_V2 = True
 except ImportError:  # pragma: no cover (Pydantic v1 fallback)
     from pydantic import root_validator as _root_validator
     from pydantic import validator as field_validator
+
     _PYDANTIC_V2 = False
 
 
@@ -38,15 +40,18 @@ class AlertRequest(BaseModel):
         return v
 
     if _PYDANTIC_V2:
+
         @model_validator(mode="after")  # type: ignore[misc]
         def _v_contact_requirements(self) -> "AlertRequest":
             if self.contact_type == "whatsapp" and not (self.phone or "").strip():
                 raise ValueError("phone is required for WhatsApp alerts")
             return self
     else:  # pragma: no cover (Pydantic v1 fallback)
+
         @_root_validator  # type: ignore[misc]
         def _v_contact_requirements_v1(cls, values: dict) -> dict:
-            if (values.get("contact_type") == "whatsapp") and not (values.get("phone") or "").strip():
+            if (values.get("contact_type") == "whatsapp") and not (
+                values.get("phone") or ""
+            ).strip():
                 raise ValueError("phone is required for WhatsApp alerts")
             return values
-

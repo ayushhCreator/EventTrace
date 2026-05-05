@@ -1,4 +1,5 @@
 """Repositories for subscription tables: subscriptions, notification_log."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -34,8 +35,15 @@ class SQLiteSubscriptionsRepository:
                 VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 """,
                 (
-                    telegram_id, room_no, target_serial, look_ahead, iso(utc_now()),
-                    hearing_date, contact_type, display_name, phone,
+                    telegram_id,
+                    room_no,
+                    target_serial,
+                    look_ahead,
+                    iso(utc_now()),
+                    hearing_date,
+                    contact_type,
+                    display_name,
+                    phone,
                 ),
             )
             return cur.lastrowid  # type: ignore[return-value]
@@ -64,9 +72,7 @@ class SQLiteSubscriptionsRepository:
                     (today,),
                 ).fetchall()
             else:
-                rows = con.execute(
-                    "SELECT * FROM subscriptions WHERE active=1"
-                ).fetchall()
+                rows = con.execute("SELECT * FROM subscriptions WHERE active=1").fetchall()
         return [dict(r) for r in rows]
 
     def update_last_notified_serial(self, sub_id: int, serial: int) -> None:
@@ -155,8 +161,17 @@ class PostgresSubscriptionsRepository:
                 VALUES(%s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (telegram_id, room_no, target_serial, look_ahead, iso(utc_now()),
-                 hearing_date, contact_type, display_name, phone),
+                (
+                    telegram_id,
+                    room_no,
+                    target_serial,
+                    look_ahead,
+                    iso(utc_now()),
+                    hearing_date,
+                    contact_type,
+                    display_name,
+                    phone,
+                ),
             )
             return cur.fetchone()["id"]  # type: ignore[index]
 
@@ -218,7 +233,9 @@ class PostgresSubscriptionsRepository:
 
     def mark_alerted(self, sub_id: int) -> None:
         with self._cursor() as cur:
-            cur.execute("UPDATE subscriptions SET alerted_at=%s WHERE id=%s", (iso(utc_now()), sub_id))
+            cur.execute(
+                "UPDATE subscriptions SET alerted_at=%s WHERE id=%s", (iso(utc_now()), sub_id)
+            )
 
     def mark_reminder_sent(self, sub_id: int) -> None:
         with self._cursor() as cur:

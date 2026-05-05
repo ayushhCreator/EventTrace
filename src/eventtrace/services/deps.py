@@ -13,4 +13,3 @@ def get_settings(request: Request) -> Settings:
 
 def get_db(request: Request) -> Any:
     return request.app.state.db
-

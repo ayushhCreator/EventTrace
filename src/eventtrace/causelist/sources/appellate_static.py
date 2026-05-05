@@ -3,6 +3,7 @@
 URL pattern: https://calcuttahighcourt.gov.in/downloads/old_cause_lists/AS/cla{DD}{MM}{YYYY}.html
 Court publishes the *next working day's* list each evening.
 """
+
 from __future__ import annotations
 
 import logging

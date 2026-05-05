@@ -19,4 +19,3 @@ def ui_display():
 @router.get("/admin", response_class=HTMLResponse)
 def ui_admin():
     return HTMLResponse((_UI_DIR / "admin.html").read_text())
-

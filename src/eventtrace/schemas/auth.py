@@ -33,4 +33,3 @@ class VerifyOTPRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
     email: str | None = None
-

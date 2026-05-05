@@ -4,6 +4,7 @@ Usage:
   chd-backfill          # last 7 days
   chd-backfill --days 14
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,11 +87,18 @@ def backfill_causelist(days: int = 7) -> None:
         if result is None:
             continue
         if not result.ok:
-            log.warning("[%s] no data for %s: %s", source.source_id, for_date, result.error or "empty")
+            log.warning(
+                "[%s] no data for %s: %s", source.source_id, for_date, result.error or "empty"
+            )
             continue
         n = db.store_causelist(result.courts)
-        log.info("[%s] stored %d cases (%d courts) for %s",
-                 source.source_id, n, len(result.courts), for_date)
+        log.info(
+            "[%s] stored %d cases (%d courts) for %s",
+            source.source_id,
+            n,
+            len(result.courts),
+            for_date,
+        )
 
 
 def main() -> None:

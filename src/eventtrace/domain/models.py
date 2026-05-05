@@ -16,4 +16,3 @@ class EventTrace:
     @property
     def duration_seconds(self) -> int:
         return max(0, int((self.end_time - self.start_time).total_seconds()))
-

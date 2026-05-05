@@ -51,4 +51,3 @@ def absent_courts(db: Any = Depends(get_db)) -> list[str]:
 @router.get("/field-durations")
 def field_durations(db: Any = Depends(get_db)) -> dict[str, str]:
     return db.list_serial_start_times()
-

@@ -21,4 +21,3 @@ def parse_dt_maybe_iso(value: datetime | str) -> datetime:
     if isinstance(value, datetime):
         return ensure_utc_aware(value)
     return ensure_utc_aware(datetime.fromisoformat(value.replace("Z", "+00:00")))
-

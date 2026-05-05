@@ -17,4 +17,3 @@ def csv_response(*, rows: list[dict], fieldnames: list[str], filename: str) -> S
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-

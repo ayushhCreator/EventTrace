@@ -1,4 +1,5 @@
 """Repositories for event-tracing tables: current_state, field_state, event_trace."""
+
 from __future__ import annotations
 
 import json
@@ -104,7 +105,9 @@ class SQLiteEventsRepository:
             for r in rows
         ]
 
-    def list_event_traces(self, limit: int = 200, court_id: str | None = None) -> list[dict[str, Any]]:
+    def list_event_traces(
+        self, limit: int = 200, court_id: str | None = None
+    ) -> list[dict[str, Any]]:
         query = """
           SELECT id, court_id, field_name, old_value, new_value,
                  start_time, end_time, duration_seconds, observed_time
@@ -208,12 +211,12 @@ class SQLiteEventsRepository:
 
     def get_monitor_state(self, key: str) -> str | None:
         with self._connect() as con:
-            row = con.execute(
-                "SELECT value FROM monitor_state WHERE key=?", (key,)
-            ).fetchone()
+            row = con.execute("SELECT value FROM monitor_state WHERE key=?", (key,)).fetchone()
         return row["value"] if row else None
 
-    def upsert_vc_zoom_link(self, date: str, room_no: str, zoom_url: str, scraped_at: datetime) -> None:
+    def upsert_vc_zoom_link(
+        self, date: str, room_no: str, zoom_url: str, scraped_at: datetime
+    ) -> None:
         with self._connect() as con:
             con.execute(
                 """
@@ -325,14 +328,22 @@ class PostgresEventsRepository:
 
     def list_current_state(self) -> list[dict[str, Any]]:
         with self._cursor() as cur:
-            cur.execute("SELECT court_id, data_json, last_seen_time FROM current_state ORDER BY court_id ASC")
+            cur.execute(
+                "SELECT court_id, data_json, last_seen_time FROM current_state ORDER BY court_id ASC"
+            )
             rows = cur.fetchall()
         return [
-            {"court_id": r["court_id"], "data": json.loads(r["data_json"]), "last_seen_time": r["last_seen_time"]}
+            {
+                "court_id": r["court_id"],
+                "data": json.loads(r["data_json"]),
+                "last_seen_time": r["last_seen_time"],
+            }
             for r in rows
         ]
 
-    def list_event_traces(self, limit: int = 200, court_id: str | None = None) -> list[dict[str, Any]]:
+    def list_event_traces(
+        self, limit: int = 200, court_id: str | None = None
+    ) -> list[dict[str, Any]]:
         if court_id:
             q = "SELECT * FROM event_trace WHERE court_id=%s ORDER BY observed_time DESC LIMIT %s"
             params: tuple = (court_id, limit)
@@ -361,12 +372,16 @@ class PostgresEventsRepository:
 
     def list_absent_court_ids(self) -> list[str]:
         with self._cursor() as cur:
-            cur.execute("SELECT court_id FROM field_state WHERE field_name='__present__' AND value='0'")
+            cur.execute(
+                "SELECT court_id FROM field_state WHERE field_name='__present__' AND value='0'"
+            )
             return [r["court_id"] for r in cur.fetchall()]
 
     def list_serial_start_times(self) -> dict[str, str]:
         with self._cursor() as cur:
-            cur.execute("SELECT court_id, start_time FROM field_state WHERE field_name='cause_list_sr_no'")
+            cur.execute(
+                "SELECT court_id, start_time FROM field_state WHERE field_name='cause_list_sr_no'"
+            )
             return {r["court_id"]: r["start_time"] for r in cur.fetchall()}
 
     def known_courts(self) -> set[str]:
@@ -422,7 +437,9 @@ class PostgresEventsRepository:
             row = cur.fetchone()
         return row["value"] if row else None
 
-    def upsert_vc_zoom_link(self, date: str, room_no: str, zoom_url: str, scraped_at: datetime) -> None:
+    def upsert_vc_zoom_link(
+        self, date: str, room_no: str, zoom_url: str, scraped_at: datetime
+    ) -> None:
         with self._cursor() as cur:
             cur.execute(
                 """

@@ -1,4 +1,5 @@
 """Abstract base for all cause list sources."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -9,9 +10,9 @@ from typing import Any
 
 @dataclass
 class SourceResult:
-    source_id: str          # e.g. "appellate_static", "original_dropdown"
-    side: str               # "APPELLATE SIDE" | "ORIGINAL SIDE"
-    list_type: str          # "DAILY" | "MONTHLY" | "SUPPLEMENTARY" | ...
+    source_id: str  # e.g. "appellate_static", "original_dropdown"
+    side: str  # "APPELLATE SIDE" | "ORIGINAL SIDE"
+    list_type: str  # "DAILY" | "MONTHLY" | "SUPPLEMENTARY" | ...
     for_date: date
     courts: list[dict[str, Any]] = field(default_factory=list)  # parse_causelist() output
     error: str | None = None

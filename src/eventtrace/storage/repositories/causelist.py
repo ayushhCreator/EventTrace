@@ -1,4 +1,5 @@
 """Repositories for causelist tables: causelist_bench, causelist_case, search."""
+
 from __future__ import annotations
 
 import json
@@ -15,8 +16,11 @@ class SQLiteCauselistRepository:
         self._connect = connect_fn
 
     def get_causelist_bench(
-        self, list_date: str, court_no: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> dict[str, Any] | None:
         clauses = ["list_date=?", "court_no=?"]
         params: list[Any] = [list_date, court_no]
@@ -34,8 +38,10 @@ class SQLiteCauselistRepository:
         return dict(row) if row else None
 
     def list_causelist_benches(
-        self, list_date: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cb.list_date=?"]
         params: list[Any] = [list_date]
@@ -61,13 +67,18 @@ class SQLiteCauselistRepository:
         return [dict(r) for r in rows]
 
     def list_causelist_cases(
-        self, list_date: str, court_no: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cc.list_date=?", "cc.court_no=?"]
         params: list[Any] = [list_date, court_no]
         if side or list_type:
-            clauses.append("cc.bench_id IN (SELECT id FROM causelist_bench WHERE list_date=? AND court_no=?")
+            clauses.append(
+                "cc.bench_id IN (SELECT id FROM causelist_bench WHERE list_date=? AND court_no=?"
+            )
             params += [list_date, court_no]
             if side:
                 clauses[-1] += " AND side=?"
@@ -217,10 +228,17 @@ class SQLiteCauselistRepository:
                       source_id=excluded.source_id
                     """,
                     (
-                        bench["list_date"], bench["court_no"],
-                        bench.get("bench_label"), side, list_type,
-                        judges_json, not_sitting, bench.get("vc_link"),
-                        bench.get("jurisdiction_notes"), now_iso, source_id,
+                        bench["list_date"],
+                        bench["court_no"],
+                        bench.get("bench_label"),
+                        side,
+                        list_type,
+                        judges_json,
+                        not_sitting,
+                        bench.get("vc_link"),
+                        bench.get("jurisdiction_notes"),
+                        now_iso,
+                        source_id,
                     ),
                 )
                 row = con.execute(
@@ -250,12 +268,24 @@ class SQLiteCauselistRepository:
                           scraped_at=excluded.scraped_at
                         """,
                         (
-                            bench_id, bench["list_date"], bench["court_no"], case["serial_no"],
-                            case["case_ref"], case["case_type"], case["case_number"], case["case_year"],
-                            case.get("petitioner"), case.get("respondent"), case.get("advocate"),
+                            bench_id,
+                            bench["list_date"],
+                            bench["court_no"],
+                            case["serial_no"],
+                            case["case_ref"],
+                            case["case_type"],
+                            case["case_number"],
+                            case["case_year"],
+                            case.get("petitioner"),
+                            case.get("respondent"),
+                            case.get("advocate"),
                             1 if case.get("pro_se") else 0,
-                            ia_json, case.get("section"), case.get("subsection"),
-                            case.get("hearing_type"), case.get("raw_text"), now_iso,
+                            ia_json,
+                            case.get("section"),
+                            case.get("subsection"),
+                            case.get("hearing_type"),
+                            case.get("raw_text"),
+                            now_iso,
                         ),
                     )
                     total += 1
@@ -269,8 +299,11 @@ class PostgresCauselistRepository:
         self._cursor = cursor_ctx
 
     def get_causelist_bench(
-        self, list_date: str, court_no: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> dict[str, Any] | None:
         clauses = ["list_date=%s", "court_no=%s"]
         params: list[Any] = [list_date, court_no]
@@ -289,8 +322,10 @@ class PostgresCauselistRepository:
         return dict(row) if row else None
 
     def list_causelist_benches(
-        self, list_date: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cb.list_date=%s"]
         params: list[Any] = [list_date]
@@ -316,8 +351,11 @@ class PostgresCauselistRepository:
             return [dict(r) for r in cur.fetchall()]
 
     def list_causelist_cases(
-        self, list_date: str, court_no: str,
-        side: str | None = None, list_type: str | None = None,
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cc.list_date=%s", "cc.court_no=%s"]
         params: list[Any] = [list_date, court_no]
@@ -472,10 +510,17 @@ class PostgresCauselistRepository:
                     RETURNING id
                     """,
                     (
-                        bench["list_date"], bench["court_no"],
-                        bench.get("bench_label"), side, list_type,
-                        judges_json, not_sitting, bench.get("vc_link"),
-                        bench.get("jurisdiction_notes"), now_iso, source_id,
+                        bench["list_date"],
+                        bench["court_no"],
+                        bench.get("bench_label"),
+                        side,
+                        list_type,
+                        judges_json,
+                        not_sitting,
+                        bench.get("vc_link"),
+                        bench.get("jurisdiction_notes"),
+                        now_iso,
+                        source_id,
                     ),
                 )
                 bench_id = cur.fetchone()["id"]
@@ -501,12 +546,24 @@ class PostgresCauselistRepository:
                           scraped_at=EXCLUDED.scraped_at
                         """,
                         (
-                            bench_id, bench["list_date"], bench["court_no"], case["serial_no"],
-                            case["case_ref"], case["case_type"], case["case_number"], case["case_year"],
-                            case.get("petitioner"), case.get("respondent"), case.get("advocate"),
+                            bench_id,
+                            bench["list_date"],
+                            bench["court_no"],
+                            case["serial_no"],
+                            case["case_ref"],
+                            case["case_type"],
+                            case["case_number"],
+                            case["case_year"],
+                            case.get("petitioner"),
+                            case.get("respondent"),
+                            case.get("advocate"),
                             1 if case.get("pro_se") else 0,
-                            ia_json, case.get("section"), case.get("subsection"),
-                            case.get("hearing_type"), case.get("raw_text"), now_iso,
+                            ia_json,
+                            case.get("section"),
+                            case.get("subsection"),
+                            case.get("hearing_type"),
+                            case.get("raw_text"),
+                            now_iso,
                         ),
                     )
                     total += 1

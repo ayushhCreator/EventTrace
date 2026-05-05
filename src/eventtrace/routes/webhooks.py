@@ -36,6 +36,5 @@ async def whatsapp_webhook(
     except Exception:
         reply = "Sorry, something went wrong. Try again."
 
-    twiml = '<?xml version="1.0" encoding="UTF-8"?>' f"<Response><Message>{reply}</Message></Response>"
+    twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{reply}</Message></Response>'
     return HTMLResponse(content=twiml, media_type="application/xml")
-

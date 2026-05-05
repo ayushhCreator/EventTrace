@@ -9,6 +9,7 @@ Four combinations exist:
   Appellate Monthly: /monthly/AS/ + cla
   Original  Monthly: /monthly/OS/ + cl
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,10 +28,10 @@ Schedule = Literal["daily", "monthly"]
 
 @dataclass(frozen=True)
 class UrlConfig:
-    path: str        # e.g. "AS" or "monthly/AS"
-    prefix: str      # e.g. "cla" or "cl"
-    side: str        # canonical: "APPELLATE SIDE" | "ORIGINAL SIDE"
-    list_type: str   # canonical: "DAILY" | "MONTHLY"
+    path: str  # e.g. "AS" or "monthly/AS"
+    prefix: str  # e.g. "cla" or "cl"
+    side: str  # canonical: "APPELLATE SIDE" | "ORIGINAL SIDE"
+    list_type: str  # canonical: "DAILY" | "MONTHLY"
     source_id: str
     schedule: Schedule = field(default="daily")
 
@@ -51,24 +52,34 @@ class UrlConfig:
 
 # All four known sources — import and use directly or via build_sources()
 APPELLATE_DAILY = UrlConfig(
-    path="AS", prefix="cla",
-    side="APPELLATE SIDE", list_type="DAILY",
+    path="AS",
+    prefix="cla",
+    side="APPELLATE SIDE",
+    list_type="DAILY",
     source_id="appellate_daily",
 )
 ORIGINAL_DAILY = UrlConfig(
-    path="OS", prefix="cl",
-    side="ORIGINAL SIDE", list_type="DAILY",
+    path="OS",
+    prefix="cl",
+    side="ORIGINAL SIDE",
+    list_type="DAILY",
     source_id="original_daily",
 )
 APPELLATE_MONTHLY = UrlConfig(
-    path="monthly/AS", prefix="cla",
-    side="APPELLATE SIDE", list_type="MONTHLY",
-    source_id="appellate_monthly", schedule="monthly",
+    path="monthly/AS",
+    prefix="cla",
+    side="APPELLATE SIDE",
+    list_type="MONTHLY",
+    source_id="appellate_monthly",
+    schedule="monthly",
 )
 ORIGINAL_MONTHLY = UrlConfig(
-    path="monthly/OS", prefix="cl",
-    side="ORIGINAL SIDE", list_type="MONTHLY",
-    source_id="original_monthly", schedule="monthly",
+    path="monthly/OS",
+    prefix="cl",
+    side="ORIGINAL SIDE",
+    list_type="MONTHLY",
+    source_id="original_monthly",
+    schedule="monthly",
 )
 
 
@@ -98,10 +109,13 @@ class StaticUrlSource(CauseListSource):
 
             if not html:
                 return SourceResult(
-                    source_id=self.source_id, side=self.side,
-                    list_type=self.list_type, for_date=for_date,
-                    error="No HTML found in first-week probe" if self._cfg.schedule == "monthly"
-                          else f"No HTML for {self._cfg.url(for_date)}",
+                    source_id=self.source_id,
+                    side=self.side,
+                    list_type=self.list_type,
+                    for_date=for_date,
+                    error="No HTML found in first-week probe"
+                    if self._cfg.schedule == "monthly"
+                    else f"No HTML for {self._cfg.url(for_date)}",
                 )
             courts = parse_causelist(html, actual_date)
             for court in courts:
@@ -109,15 +123,19 @@ class StaticUrlSource(CauseListSource):
                 court["bench"].setdefault("list_type", self.list_type)
                 court["bench"]["source_id"] = self.source_id
             return SourceResult(
-                source_id=self.source_id, side=self.side,
-                list_type=self.list_type, for_date=actual_date,
+                source_id=self.source_id,
+                side=self.side,
+                list_type=self.list_type,
+                for_date=actual_date,
                 courts=courts,
             )
         except Exception as exc:
             log.error("[%s] fetch failed for %s: %s", self.source_id, for_date, exc)
             return SourceResult(
-                source_id=self.source_id, side=self.side,
-                list_type=self.list_type, for_date=for_date,
+                source_id=self.source_id,
+                side=self.side,
+                list_type=self.list_type,
+                for_date=for_date,
                 error=str(exc),
             )
 

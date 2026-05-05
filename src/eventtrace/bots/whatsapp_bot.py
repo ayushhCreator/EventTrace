@@ -12,6 +12,7 @@ Commands (same logic as Telegram bot):
   DAILY
   HELP
 """
+
 from __future__ import annotations
 
 import base64
@@ -32,11 +33,12 @@ log = logging.getLogger(__name__)
 
 # ── Outbound sender ───────────────────────────────────────────────────────────
 
+
 def send_whatsapp_sync(
     account_sid: str,
     auth_token: str,
-    from_number: str,   # "whatsapp:+14155238886"
-    to_phone: str,      # "+919876543210"  (E.164, no whatsapp: prefix)
+    from_number: str,  # "whatsapp:+14155238886"
+    to_phone: str,  # "+919876543210"  (E.164, no whatsapp: prefix)
     body: str,
 ) -> None:
     """Send a WhatsApp message via Twilio REST API (blocking)."""
@@ -69,6 +71,7 @@ def _build_alert_message(payload: dict) -> str:
 
 
 # ── Helpers (shared with Telegram bot logic) ──────────────────────────────────
+
 
 def _get_room_serial(db: DB, room_no: str) -> int | None:
     today = ist_today_str()
@@ -108,6 +111,7 @@ def _all_rooms_summary(db: DB) -> list[dict]:
 
 
 # ── Inbound command parser ────────────────────────────────────────────────────
+
 
 def handle_inbound(form: dict[str, Any], db: DB) -> str:
     """Parse a Twilio inbound WhatsApp message and return the reply text."""
@@ -210,9 +214,13 @@ def _cmd_today(db: DB) -> str:
         else:
             msg = f"🏛 Board closed for {today}. Court session has ended.\n\n"
         if vc_count:
-            msg += f"📋 Cause list has *{vc_count} courts* with VC links.\nSend CAUSELIST to see them."
+            msg += (
+                f"📋 Cause list has *{vc_count} courts* with VC links.\nSend CAUSELIST to see them."
+            )
         else:
-            msg += "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+            msg += (
+                "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+            )
         if warning:
             msg += warning
         return msg
@@ -229,7 +237,9 @@ def _cmd_today(db: DB) -> str:
         if vc_count:
             msg += f"📋 Today's cause list has *{vc_count} courts* with VC links.\nSend CAUSELIST to see them."
         else:
-            msg += "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+            msg += (
+                "Today's cause list not published yet.\nCheck calcuttahighcourt.gov.in after 9 AM."
+            )
         if warning:
             msg += warning
         return msg
@@ -269,7 +279,9 @@ def _cmd_zoom(db: DB, room_no: str) -> str:
     canonical = room_no.lstrip("0") or room_no
     url = next((vc_links[k] for k in vc_links if (k.lstrip("0") or k) == canonical), None)
     if not url:
-        return f"📹 No VC link for Room {room_no} on {today}.\nSend CAUSELIST to see available rooms."
+        return (
+            f"📹 No VC link for Room {room_no} on {today}.\nSend CAUSELIST to see available rooms."
+        )
     return f"📹 Room {room_no} — {today}\n{url}"
 
 
@@ -325,6 +337,7 @@ def _cmd_status(db: DB, room_no: str) -> str:
 
 def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
     import re as _re
+
     room_no = parts[1]
     try:
         target = int(parts[2])
@@ -366,12 +379,14 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
     if current is not None and current >= alert_at:
         today_str = ist_today_str()
         vc_links = db.get_vc_zoom_links(today_str)
-        alert = _build_alert_message({
-            "room_no": room_no,
-            "current_serial": current,
-            "target_serial": target,
-            "zoom_url": vc_links.get(room_no, ""),
-        })
+        alert = _build_alert_message(
+            {
+                "room_no": room_no,
+                "current_serial": current,
+                "target_serial": target,
+                "zoom_url": vc_links.get(room_no, ""),
+            }
+        )
         if current >= target:
             note = f"⚠️ Your case serial ({target}) may already have been called."
         else:

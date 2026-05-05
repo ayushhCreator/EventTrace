@@ -41,7 +41,12 @@ def _extract_vc_links(text: str) -> dict[str, str]:
         if vc_match:
             zoom_url = vc_match.group(1).strip().rstrip(".,;)")
             if room_no in result and result[room_no] != zoom_url:
-                log.warning("Court %s has conflicting VC links: %s vs %s — keeping first", room_no, result[room_no], zoom_url)
+                log.warning(
+                    "Court %s has conflicting VC links: %s vs %s — keeping first",
+                    room_no,
+                    result[room_no],
+                    zoom_url,
+                )
             elif room_no in result:
                 log.debug("Court %s duplicated in cause list (same URL), skipping", room_no)
             else:
@@ -61,7 +66,11 @@ async def scrape_vc_links(for_date: date, settings: Settings) -> dict[str, str]:
         try:
             response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             if response is None or response.status >= 400:
-                log.warning("Cause list not available for %s (HTTP %s)", for_date, response and response.status)
+                log.warning(
+                    "Cause list not available for %s (HTTP %s)",
+                    for_date,
+                    response and response.status,
+                )
                 return {}
             # Get inner text — strips HTML tags, preserving whitespace structure
             text = await page.inner_text("body")
@@ -90,8 +99,10 @@ def scrape_and_store_vc_links(for_date: date, settings: Settings, db: DB) -> dic
 def main() -> None:
     """CLI entry point: chd-scrape-vc [YYYY-MM-DD]"""
     import sys
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from ..config import Settings
+
     settings = Settings()
     db = DB(settings.db_path)
     db.ensure_schema()
@@ -100,6 +111,7 @@ def main() -> None:
         for_date = date.fromisoformat(sys.argv[1])
     else:
         from datetime import timedelta
+
         for_date = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
 
     links = scrape_and_store_vc_links(for_date, settings, db)

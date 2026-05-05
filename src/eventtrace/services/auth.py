@@ -94,4 +94,3 @@ def otp_rate_limited(existing_otp: dict | None) -> bool:
 def otp_expired(expires_at: datetime | str) -> bool:
     exp = ensure_utc_aware(parse_dt_maybe_iso(expires_at))
     return datetime.now(timezone.utc) > exp
-

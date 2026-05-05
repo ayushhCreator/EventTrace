@@ -15,6 +15,7 @@ def history_dates(db: Any = Depends(get_db)) -> list[str]:
 
 
 @router.get("/history/day")
-def history_day(date: str = Query(..., description="YYYY-MM-DD in IST"), db: Any = Depends(get_db)) -> list[dict]:
+def history_day(
+    date: str = Query(..., description="YYYY-MM-DD in IST"), db: Any = Depends(get_db)
+) -> list[dict]:
     return db.list_day_activity(date)
-
