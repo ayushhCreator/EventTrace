@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import sqlite3
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fastapi.testclient import TestClient
@@ -27,7 +29,9 @@ def _make_client() -> TestClient:
     with patch.dict(os.environ, env):
         from eventtrace.api import create_app
         app = create_app()
-    return TestClient(app, raise_server_exceptions=True)
+    client = TestClient(app, raise_server_exceptions=True)
+    client.db_path = tmp.name  # type: ignore[attr-defined]
+    return client
 
 
 class TestHealth(unittest.TestCase):
@@ -156,6 +160,36 @@ class TestCauselistRoutes(unittest.TestCase):
     def test_serial_not_found_404(self):
         r = self.c.get("/causelist/2026-05-02/court/1/serial/1")
         self.assertEqual(r.status_code, 404)
+
+    def test_court_with_data_200(self):
+        # Regression: list_causelist_cases() must not reference an undefined table alias.
+        con = sqlite3.connect(self.c.db_path)  # type: ignore[attr-defined]
+        con.execute("PRAGMA foreign_keys=ON")
+        cur = con.cursor()
+        cur.execute(
+            """
+            INSERT INTO causelist_bench (list_date, court_no, judges_json, scraped_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("2026-05-02", "1", "[]", "2026-05-02T00:00:00Z"),
+        )
+        bench_id = cur.lastrowid
+        cur.execute(
+            """
+            INSERT INTO causelist_case (bench_id, list_date, court_no, serial_no, ia_numbers_json, scraped_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (bench_id, "2026-05-02", "1", 1, "[]", "2026-05-02T00:00:00Z"),
+        )
+        con.commit()
+        con.close()
+
+        r = self.c.get("/causelist/2026-05-02/court/1")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("bench", body)
+        self.assertIn("cases", body)
+        self.assertEqual(len(body["cases"]), 1)
 
 
 class TestAlertRoute(unittest.TestCase):

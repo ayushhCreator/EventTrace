@@ -89,7 +89,7 @@ class SQLiteCauselistRepository:
             clauses[-1] += ")"
         with self._connect() as con:
             rows = con.execute(
-                f"SELECT * FROM causelist_case WHERE {' AND '.join(clauses)} ORDER BY serial_no",
+                f"SELECT cc.* FROM causelist_case cc WHERE {' AND '.join(clauses)} ORDER BY cc.serial_no",
                 params,
             ).fetchall()
         return [dict(r) for r in rows]
@@ -371,7 +371,7 @@ class PostgresCauselistRepository:
             clauses.append(f"cc.bench_id IN ({sub})")
         with self._cursor() as cur:
             cur.execute(
-                f"SELECT * FROM causelist_case WHERE {' AND '.join(clauses)} ORDER BY serial_no",
+                f"SELECT cc.* FROM causelist_case cc WHERE {' AND '.join(clauses)} ORDER BY cc.serial_no",
                 params,
             )
             return [dict(r) for r in cur.fetchall()]
