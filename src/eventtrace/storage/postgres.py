@@ -276,6 +276,32 @@ class PostgresDB:
             """,
             "CREATE INDEX IF NOT EXISTS idx_cte_user_ref ON case_timeline_events(user_id, case_ref)",
             "CREATE INDEX IF NOT EXISTS idx_cte_event_date ON case_timeline_events(event_date)",
+            # ── Matters (case billing registration) ──────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS matter (
+              id              SERIAL PRIMARY KEY,
+              user_id         UUID NOT NULL,
+              case_ref        TEXT NOT NULL,
+              case_title      TEXT,
+              case_type       TEXT,
+              case_number     TEXT,
+              case_year       INTEGER,
+              court_no        TEXT,
+              petitioner      TEXT,
+              respondent      TEXT,
+              status          TEXT NOT NULL DEFAULT 'active',
+              billing_mode    TEXT NOT NULL DEFAULT 'appearance',
+              fee_per_appearance NUMERIC(12,2),
+              notes           TEXT,
+              opened_at       DATE,
+              closed_at       DATE,
+              created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              UNIQUE(user_id, case_ref)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_matter_user ON matter(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_matter_case_ref ON matter(case_ref)",
+            "CREATE INDEX IF NOT EXISTS idx_matter_status ON matter(user_id, status)",
         ]
         with self._cursor() as cur:
             # Try to enable trigram extension — non-fatal if superuser not available
@@ -840,3 +866,101 @@ class PostgresDB:
 
     def has_causelist_alert_today(self, user_id: str, case_ref: str, event_date: str) -> bool:
         return self._timeline.has_causelist_alert_today(user_id, case_ref, event_date)
+
+    # ── Matter (billing registration) ────────────────────────────────────────
+
+    def list_matters(self, user_id: str, status: str | None = None) -> list[dict]:
+        with self._cursor() as cur:
+            if status:
+                cur.execute(
+                    "SELECT * FROM matter WHERE user_id=%s AND status=%s ORDER BY created_at DESC",
+                    (user_id, status),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM matter WHERE user_id=%s ORDER BY created_at DESC",
+                    (user_id,),
+                )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_matter(self, user_id: str, matter_id: int) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT * FROM matter WHERE id=%s AND user_id=%s",
+                (matter_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def create_matter(
+        self,
+        user_id: str,
+        case_ref: str,
+        case_title: str | None = None,
+        case_type: str | None = None,
+        case_number: str | None = None,
+        case_year: int | None = None,
+        court_no: str | None = None,
+        petitioner: str | None = None,
+        respondent: str | None = None,
+        billing_mode: str = "appearance",
+        fee_per_appearance: float | None = None,
+        notes: str | None = None,
+        opened_at: str | None = None,
+    ) -> dict:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO matter (
+                    user_id, case_ref, case_title, case_type, case_number, case_year,
+                    court_no, petitioner, respondent, billing_mode, fee_per_appearance,
+                    notes, opened_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (user_id, case_ref)
+                DO UPDATE SET
+                    case_title=EXCLUDED.case_title,
+                    case_type=EXCLUDED.case_type,
+                    case_number=EXCLUDED.case_number,
+                    case_year=EXCLUDED.case_year,
+                    court_no=EXCLUDED.court_no,
+                    petitioner=EXCLUDED.petitioner,
+                    respondent=EXCLUDED.respondent,
+                    billing_mode=EXCLUDED.billing_mode,
+                    fee_per_appearance=EXCLUDED.fee_per_appearance,
+                    notes=EXCLUDED.notes,
+                    opened_at=COALESCE(EXCLUDED.opened_at, matter.opened_at)
+                RETURNING *
+                """,
+                (
+                    user_id, case_ref, case_title, case_type, case_number, case_year,
+                    court_no, petitioner, respondent, billing_mode, fee_per_appearance,
+                    notes, opened_at,
+                ),
+            )
+            return dict(cur.fetchone())
+
+    def update_matter(self, user_id: str, matter_id: int, **fields) -> dict | None:
+        allowed = {
+            "case_title", "court_no", "petitioner", "respondent",
+            "billing_mode", "fee_per_appearance", "notes",
+            "status", "opened_at", "closed_at",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return self.get_matter(user_id, matter_id)
+        set_clause = ", ".join(f"{k}=%s" for k in updates)
+        with self._cursor() as cur:
+            cur.execute(
+                f"UPDATE matter SET {set_clause} WHERE id=%s AND user_id=%s RETURNING *",
+                (*updates.values(), matter_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def delete_matter(self, user_id: str, matter_id: int) -> bool:
+        with self._cursor() as cur:
+            cur.execute(
+                "DELETE FROM matter WHERE id=%s AND user_id=%s",
+                (matter_id, user_id),
+            )
+            return cur.rowcount > 0

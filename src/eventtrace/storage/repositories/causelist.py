@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
+
+# Matches TYPE/NUM/YEAR — used to split structured case_ref searches
+_SEARCH_CASE_REF_RE = re.compile(
+    r"^([A-Za-z][A-Za-z0-9\.\(\)\-]*)[\s/]+(\d+)(?:[\s/]+(\d{4}))?$"
+)
 
 from ...common.time import iso, utc_now
 
@@ -125,12 +131,21 @@ class SQLiteCauselistRepository:
         params: list[Any] = []
 
         if case_ref:
-            if "/" in case_ref:
-                clauses.append("cc.case_ref = ?")
-                params.append(case_ref)
+            m = _SEARCH_CASE_REF_RE.match(case_ref.strip())
+            if m:
+                type_prefix = m.group(1).upper()
+                num = m.group(2).lstrip("0") or m.group(2)
+                year = m.group(3)
+                clauses.append("cc.case_type LIKE ?")
+                params.append(f"{type_prefix}%")
+                clauses.append("cc.case_number = ?")
+                params.append(num)
+                if year:
+                    clauses.append("cc.case_year = ?")
+                    params.append(int(year))
             else:
                 clauses.append("cc.case_ref LIKE ?")
-                params.append(f"%{case_ref}%")
+                params.append(f"%{case_ref.upper()}%")
         if advocate:
             clauses.append("cc.advocate LIKE ?")
             params.append(f"%{advocate.upper()}%")
@@ -160,7 +175,7 @@ class SQLiteCauselistRepository:
         with self._connect() as con:
             rows = con.execute(
                 f"""
-                SELECT cc.*, cb.judges_json, cb.vc_link
+                SELECT cc.*, cb.judges_json, cb.vc_link, cb.bench_label, cb.jurisdiction
                 FROM causelist_case cc
                 JOIN causelist_bench cb ON cb.id = cc.bench_id
                 {where}
@@ -408,9 +423,18 @@ class PostgresCauselistRepository:
         params: list[Any] = []
 
         if case_ref:
-            if "/" in case_ref:
-                clauses.append("cc.case_ref = %s")
-                params.append(case_ref)
+            m = _SEARCH_CASE_REF_RE.match(case_ref.strip())
+            if m:
+                type_prefix = m.group(1).upper()
+                num = m.group(2).lstrip("0") or m.group(2)
+                year = m.group(3)
+                clauses.append("cc.case_type ILIKE %s")
+                params.append(f"{type_prefix}%")
+                clauses.append("cc.case_number = %s")
+                params.append(num)
+                if year:
+                    clauses.append("cc.case_year = %s")
+                    params.append(int(year))
             else:
                 clauses.append("cc.case_ref ILIKE %s")
                 params.append(f"%{case_ref}%")
@@ -442,7 +466,7 @@ class PostgresCauselistRepository:
         with self._cursor() as cur:
             cur.execute(
                 f"""
-                SELECT cc.*, cb.judges_json, cb.vc_link
+                SELECT cc.*, cb.judges_json, cb.vc_link, cb.bench_label, cb.jurisdiction
                 FROM causelist_case cc
                 JOIN causelist_bench cb ON cb.id = cc.bench_id
                 {where}

@@ -241,7 +241,7 @@ def parse_court_header(block: str) -> dict[str, Any]:
 # ── Case parsing ──────────────────────────────────────────────────────────────
 
 _SERIAL_RE = re.compile(r"^\d+$")
-_CASE_REF_RE = re.compile(r"^([A-Z][A-Z\.\(\)]*(?:\([A-Z\(\)]+\))?)\s*/\s*(\d+)\s*/\s*(\d{4})\s*$")
+_CASE_REF_RE = re.compile(r"^([A-Z][A-Z\.\(\)\-]*(?:\([A-Z\(\)]+\))?)\s*/\s*(\d+)\s*/\s*(\d{4})\s*$")
 _IA_RE = re.compile(r"^IA\s+NO\s*:\s*([A-Z]+(?:\([A-Z]+\))?/\d+/\d{4})", re.IGNORECASE)
 _SUBSEC_RE = re.compile(r"^\(([A-Z][A-Z\s\-IX/&\.]+)\)\s*$")
 # All-caps line = section header candidate
@@ -267,6 +267,41 @@ _CASE_TYPE_NORM: dict[str, str] = {
     "CS": "CS",
     "C.P.": "CP",
     "CP": "CP",
+    # Additional Calcutta HC types
+    "F.M.A.": "FMA",
+    "FMA": "FMA",
+    "R.V.W.": "RVW",
+    "RVW": "RVW",
+    "R.V.W.O.": "RVWO",
+    "RVWO": "RVWO",
+    "C.P.A.N.": "CPAN",
+    "CPAN": "CPAN",
+    "C.R.R.": "CRR",
+    "CRR": "CRR",
+    "R.S.A.": "RSA",
+    "RSA": "RSA",
+    "S.A.T.": "SAT",
+    "SAT": "SAT",
+    "I.T.A.": "ITA",
+    "ITA": "ITA",
+    "A.P.": "AP",
+    "AP": "AP",
+    "EC-COM": "EC-COM",
+    "ECCOM": "EC-COM",
+    "EC.COM": "EC-COM",
+    "AP.COM": "AP.COM",
+    "APCOM": "AP.COM",
+    "AP-COM": "AP.COM",
+    "W.P.": "WP",
+    "WP": "WP",
+    "E.S.": "ES",
+    "ES": "ES",
+    "C.R.AN.": "CRAN",
+    "CRAN": "CRAN",
+    "G.A.": "GA",
+    "GA": "GA",
+    "I.A.": "IA",
+    "IA": "IA",
 }
 
 _SECTION_TAGS: dict[str, str] = {

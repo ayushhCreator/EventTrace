@@ -78,6 +78,8 @@ class Settings:
         # MSG91 — OTP delivery
         self.msg91_auth_key = _get_env("MSG91_AUTH_KEY", "")
         self.msg91_template_id = _get_env("MSG91_TEMPLATE_ID", "")
+        # Anthropic API key — used for eCourts CAPTCHA solving via Claude Vision
+        self.anthropic_api_key = _get_env("ANTHROPIC_API_KEY", "") or None
         # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
         self.jwt_secret = _get_env("JWT_SECRET", "change-me-in-production")
         _default_secret = "change-me-in-production"
