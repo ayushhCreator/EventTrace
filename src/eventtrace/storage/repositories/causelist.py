@@ -27,6 +27,7 @@ class SQLiteCauselistRepository:
         court_no: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> dict[str, Any] | None:
         clauses = ["list_date=?", "court_no=?"]
         params: list[Any] = [list_date, court_no]
@@ -36,6 +37,9 @@ class SQLiteCauselistRepository:
         if list_type:
             clauses.append("list_type=?")
             params.append(list_type)
+        if source_id:
+            clauses.append("source_id=?")
+            params.append(source_id)
         with self._connect() as con:
             row = con.execute(
                 f"SELECT * FROM causelist_bench WHERE {' AND '.join(clauses)} LIMIT 1",
@@ -48,6 +52,7 @@ class SQLiteCauselistRepository:
         list_date: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cb.list_date=?"]
         params: list[Any] = [list_date]
@@ -57,6 +62,9 @@ class SQLiteCauselistRepository:
         if list_type:
             clauses.append("cb.list_type=?")
             params.append(list_type)
+        if source_id:
+            clauses.append("cb.source_id=?")
+            params.append(source_id)
         where = " AND ".join(clauses)
         with self._connect() as con:
             rows = con.execute(
@@ -78,10 +86,11 @@ class SQLiteCauselistRepository:
         court_no: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cc.list_date=?", "cc.court_no=?"]
         params: list[Any] = [list_date, court_no]
-        if side or list_type:
+        if side or list_type or source_id:
             clauses.append(
                 "cc.bench_id IN (SELECT id FROM causelist_bench WHERE list_date=? AND court_no=?"
             )
@@ -92,6 +101,9 @@ class SQLiteCauselistRepository:
             if list_type:
                 clauses[-1] += " AND list_type=?"
                 params.append(list_type)
+            if source_id:
+                clauses[-1] += " AND source_id=?"
+                params.append(source_id)
             clauses[-1] += ")"
         with self._connect() as con:
             rows = con.execute(
@@ -233,14 +245,16 @@ class SQLiteCauselistRepository:
                     """
                     INSERT INTO causelist_bench(
                       list_date, court_no, bench_label, side, list_type,
-                      judges_json, not_sitting, vc_link, jurisdiction, scraped_at, source_id
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                      judges_json, not_sitting, vc_link, jurisdiction, scraped_at, source_id,
+                      at_time, floor, building
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(list_date, court_no, side, list_type) DO UPDATE SET
                       bench_label=excluded.bench_label,
                       judges_json=excluded.judges_json,
                       not_sitting=excluded.not_sitting, vc_link=excluded.vc_link,
                       jurisdiction=excluded.jurisdiction, scraped_at=excluded.scraped_at,
-                      source_id=excluded.source_id
+                      source_id=excluded.source_id,
+                      at_time=excluded.at_time, floor=excluded.floor, building=excluded.building
                     """,
                     (
                         bench["list_date"],
@@ -254,6 +268,9 @@ class SQLiteCauselistRepository:
                         bench.get("jurisdiction_notes"),
                         now_iso,
                         source_id,
+                        bench.get("at_time"),
+                        bench.get("floor"),
+                        bench.get("building"),
                     ),
                 )
                 row = con.execute(
@@ -319,6 +336,7 @@ class PostgresCauselistRepository:
         court_no: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> dict[str, Any] | None:
         clauses = ["list_date=%s", "court_no=%s"]
         params: list[Any] = [list_date, court_no]
@@ -328,6 +346,9 @@ class PostgresCauselistRepository:
         if list_type:
             clauses.append("list_type=%s")
             params.append(list_type)
+        if source_id:
+            clauses.append("source_id=%s")
+            params.append(source_id)
         with self._cursor() as cur:
             cur.execute(
                 f"SELECT * FROM causelist_bench WHERE {' AND '.join(clauses)} LIMIT 1",
@@ -341,6 +362,7 @@ class PostgresCauselistRepository:
         list_date: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cb.list_date=%s"]
         params: list[Any] = [list_date]
@@ -350,6 +372,9 @@ class PostgresCauselistRepository:
         if list_type:
             clauses.append("cb.list_type=%s")
             params.append(list_type)
+        if source_id:
+            clauses.append("cb.source_id=%s")
+            params.append(source_id)
         where = " AND ".join(clauses)
         with self._cursor() as cur:
             cur.execute(
@@ -371,10 +396,11 @@ class PostgresCauselistRepository:
         court_no: str,
         side: str | None = None,
         list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["cc.list_date=%s", "cc.court_no=%s"]
         params: list[Any] = [list_date, court_no]
-        if side or list_type:
+        if side or list_type or source_id:
             sub = "SELECT id FROM causelist_bench WHERE list_date=%s AND court_no=%s"
             params += [list_date, court_no]
             if side:
@@ -383,6 +409,9 @@ class PostgresCauselistRepository:
             if list_type:
                 sub += " AND list_type=%s"
                 params.append(list_type)
+            if source_id:
+                sub += " AND source_id=%s"
+                params.append(source_id)
             clauses.append(f"cc.bench_id IN ({sub})")
         with self._cursor() as cur:
             cur.execute(
@@ -523,14 +552,16 @@ class PostgresCauselistRepository:
                     """
                     INSERT INTO causelist_bench(
                       list_date, court_no, bench_label, side, list_type,
-                      judges_json, not_sitting, vc_link, jurisdiction, scraped_at, source_id
-                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                      judges_json, not_sitting, vc_link, jurisdiction, scraped_at, source_id,
+                      at_time, floor, building
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(list_date, court_no, side, list_type) DO UPDATE SET
                       bench_label=EXCLUDED.bench_label,
                       judges_json=EXCLUDED.judges_json,
                       not_sitting=EXCLUDED.not_sitting, vc_link=EXCLUDED.vc_link,
                       jurisdiction=EXCLUDED.jurisdiction, scraped_at=EXCLUDED.scraped_at,
-                      source_id=EXCLUDED.source_id
+                      source_id=EXCLUDED.source_id,
+                      at_time=EXCLUDED.at_time, floor=EXCLUDED.floor, building=EXCLUDED.building
                     RETURNING id
                     """,
                     (
@@ -545,6 +576,9 @@ class PostgresCauselistRepository:
                         bench.get("jurisdiction_notes"),
                         now_iso,
                         source_id,
+                        bench.get("at_time"),
+                        bench.get("floor"),
+                        bench.get("building"),
                     ),
                 )
                 bench_id = cur.fetchone()["id"]

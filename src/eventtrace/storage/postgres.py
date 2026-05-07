@@ -366,6 +366,9 @@ class PostgresDB:
             # Step 1: add source_id column
             try:
                 cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS source_id TEXT")
+                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS at_time TEXT")
+                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS floor TEXT")
+                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS building TEXT")
             except Exception:
                 pass
 
@@ -583,22 +586,22 @@ class PostgresDB:
     # ── Causelist delegation ─────────────────────────────────────────────────
 
     def get_causelist_bench(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None
+        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
     ) -> dict[str, Any] | None:
         return self._causelist.get_causelist_bench(
-            list_date, court_no, side=side, list_type=list_type
+            list_date, court_no, side=side, list_type=list_type, source_id=source_id
         )
 
     def list_causelist_benches(
-        self, list_date: str, side: str | None = None, list_type: str | None = None
+        self, list_date: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
     ) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type)
+        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type, source_id=source_id)
 
     def list_causelist_cases(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None
+        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
     ) -> list[dict[str, Any]]:
         return self._causelist.list_causelist_cases(
-            list_date, court_no, side=side, list_type=list_type
+            list_date, court_no, side=side, list_type=list_type, source_id=source_id
         )
 
     def get_causelist_case_by_serial(
@@ -775,6 +778,28 @@ class PostgresDB:
                 (user_id, case_ref),
             )
             return cur.rowcount > 0
+
+    def get_courts_with_active_case_alerts(self, today: str) -> set[str]:
+        """Return court numbers that currently have active serial alerts.
+
+        Used by the monitor's serial-alert checker to avoid unnecessary per-row
+        DB lookups when no alerts exist for a given court.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT court_no
+                FROM tracked_cases
+                WHERE court_no IS NOT NULL
+                  AND court_no <> ''
+                  AND alert_active=1
+                  AND alert_serial IS NOT NULL
+                  AND (alerted_at IS NULL OR alerted_at < %s)
+                """,
+                (today,),
+            )
+            rows = cur.fetchall()
+        return {str(r["court_no"]).strip() for r in rows if r.get("court_no")}
 
     def list_active_case_alerts(self, court_no: str, today: str) -> list[dict]:
         with self._cursor() as cur:

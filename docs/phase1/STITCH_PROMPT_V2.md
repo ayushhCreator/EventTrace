@@ -227,45 +227,130 @@ CourtDetail content:
   — If no events yet: "No cases called yet today" centered gray-400
 
 ═══════════════════════════════════════
-SCREEN 5: CAUSE LIST PAGE
+SCREEN 5: CAUSE LIST PAGE (REDESIGNED)
 ═══════════════════════════════════════
 
-DESKTOP: Two-panel layout
+OVERVIEW: The page has two layouts — mobile (full-screen with horizontal tab bar) and desktop (two-panel sidebar). Both share the same Court Header + Cases Body, but the navigation shell differs. Tabs/sidebar filter by source document (Appellate Daily, Original Daily, etc.) not by a "side" label — because one PDF can contain courts from both sides.
 
-Left panel (280px fixed, white bg, right border):
-  — "Cause List" 16px semibold + date dropdown right-aligned (shows available dates, most recent first, YYYY-MM-DD display)
-  — Side filter chips: [Appellate] [Original] — pill chips below header
-  — List type chips: [Daily] [Monthly] [Special] — second row
-  — Court list scrollable:
-      Each row 48px: "Court 1" 14px semibold gray-900 + bench label 11px gray-500 below + case count badge right
-      Selected: violet-100 bg + violet-700 left border 3px
-      NOT SITTING: "NOT SITTING" red-500 11px right, row muted opacity 60%
-      Hover: gray-50 bg
+─────────────────────────────────
+NEW COMPONENTS (add to design system)
+─────────────────────────────────
 
-Right panel (flex-1):
-  Empty state: centered, scales-of-justice outline icon gray-200 48px, "Select a court to view cases" gray-400 14px
-  
-  Court selected state:
-    Panel header (sticky, white, bottom border):
-      — "Court 1 — Daily List" 16px bold
-      — "Bench: Division Bench" gray-500 13px
-      — "Hon'ble Justice X, Hon'ble Justice Y" gray-600 13px
-      — Case count: "42 cases" violet badge right
-    
-    Cases table (sticky column headers):
-      Columns: [#] [Case Ref] [Petitioner] [Respondent] [Advocate] [Actions]
-      Header: 11px uppercase gray-500 semibold, gray-50 bg
-      Row: 13px, 40px tall, hover violet-50 bg
-      Case ref: violet mono 13px
-      Long text: truncate with ellipsis + tooltip on hover
-      Actions column (appears on row hover): star icon button "Track" + info icon "Details"
-      Row click: expand inline row with full details OR open CaseDetail modal
+CourtHeader (full-width block, sits above cases, inside the right panel / main view):
+  — Top row: "COURT NO. 1" 18px bold gray-900 left | NOT SITTING red-500 pill badge right (only if not sitting)
+  — Bench label row: "DIVISION BENCH (DB - I)" 14px gray-700
+  — Location row: floor icon (stairs) + "First Floor, Main Building" 13px gray-500 (only if floor/building set)
+  — Time row: clock icon + "AT 10:30 AM" 13px gray-500 (only if at_time set)
+  — Judges list: 
+      — Header label: "HON'BLE JUDGES" 11px uppercase gray-400 semibold
+      — Each judge on own row, 13px gray-700, gavel icon left
+  — Divider gray-100
+  — Jurisdiction block (collapsible):
+      — Header row: "JURISDICTION" 11px uppercase gray-400 + "▾ Show" / "▴ Hide" violet link right
+      — Collapsed by default on mobile, expanded on desktop
+      — Content: paragraphs of jurisdiction text, 12px gray-600, line-height 1.6, max-h 200px overflow scroll if long
+  — Action row (right-aligned): [Join VC] violet outline button 32px (only if vc_link exists)
+  — Card: white bg, 1px border gray-100, rounded-xl, 16px padding, shadow-sm
 
-  Empty results state: "No cases found for this court and date" gray-400 centered
+VcButton component:
+  — violet outline 28px pill: video-camera icon + "VC" text 11px
+  — Opens vc_link in new tab
+  — Only renders when vc_link is non-null
 
-MOBILE: Full-screen drill-down
-  Screen A (courts list): same as left panel but full width, back button top-left
-  Screen B (cases list): full width table, back button "← Court 1" top-left, swipe-right to go back
+CaseMobileCard (used on mobile, replaces table rows):
+  — White card, 1px border gray-200, rounded-xl, 12px padding, mb 8px
+  — Top row: serial number gray-400 11px left + case ref violet mono 13px bold right
+  — Petitioner row: "Petitioner" label gray-400 10px + name gray-900 13px below
+  — VS divider: "vs" italic gray-400 11px, 4px vertical margin
+  — Respondent row: "Respondent" label gray-400 10px + name gray-900 13px below
+  — Advocate row (if present): scales-icon gray-400 + advocate name gray-600 12px
+  — IA numbers row (if present): "IA: 123/2026" gray-400 11px
+  — Footer row: [VC button] left (if vc_link on bench) | [Track ☆] violet pill button right
+    Track button: shows star-fill + "Tracking" violet if already tracked, star-outline + "Track" gray-outline if not
+
+CaseDesktopRow (used on desktop, replaces table rows):
+  — Flex row, py-3, hover violet-50 bg, border-b gray-100
+  — Serial: 40px min-width, gray-400 12px
+  — Body (flex-1): 
+      — Top line: case ref violet mono 13px bold + section badge gray 11px (if section non-null)
+      — Petitioner 12px gray-700 | "vs" italic gray-400 | Respondent 12px gray-700
+      — Advocate row: scales icon + name gray-500 12px (if present)
+  — Actions (80px min-width, right-aligned, flex gap-2):
+      — [VC] violet outline 26px (if bench vc_link exists)
+      — [☆ Track] / [★ Tracking] button 26px, same states as mobile
+
+SectionHeader (sticky inside scroll area, sits above each group of cases):
+  — gray-50 bg, top/bottom border gray-100, px-4 py-2, sticky top-0 z-10
+  — Section name: 11px uppercase semibold gray-500 + case count badge gray-300 right
+
+CourtTabBar (mobile only, horizontal scroll, replaces left sidebar):
+  — Fixed below top controls, white bg, border-b gray-200, px-4, py-2
+  — Horizontally scrollable row of pill buttons (no scroll bar visible)
+  — Each pill: court_no + " " + bench_label truncated 12ch, 11px
+  — Active: violet-700 bg, white text, font-semibold
+  — Inactive: gray-100 bg, gray-600 text
+  — Scroll active tab into view on select (scrollIntoView)
+
+CourtSidebar (desktop left panel, 256px fixed):
+  — White bg, right border gray-200, overflow-y-auto
+  — Each item 48px: "Court 1" 14px semibold gray-900 + bench_label 11px gray-500 truncated
+  — Right: case_count badge gray
+  — Selected: violet-100 bg + violet-700 left border 3px
+  — NOT SITTING: "NOT SITTING" red-500 10px right, opacity 60%
+  — Hover: gray-50 bg
+
+─────────────────────────────────
+DESKTOP LAYOUT (≥ 768px)
+─────────────────────────────────
+
+Top controls strip (white bg, px-4 py-3, border-b gray-200, sticky top-0):
+  — "Cause List" 16px semibold gray-900
+  — Date dropdown: shows all dates, most-recent first, YYYY-MM-DD
+  — Toggle group [Appellate | Original] — controls source_id filter
+  — Toggle group [Daily | Monthly] — controls list_type in source_id (disabled/faded if no monthly data for selected date)
+
+Body: flex row, height = viewport minus top controls
+
+  Left: CourtSidebar 256px
+  Right: flex-1 overflow-y-auto
+    Empty state (no court selected): scales-of-justice outline 40px gray-200 centered + "Select a court" gray-400
+    Court selected:
+      CourtHeader (full)
+      SectionHeader + CaseDesktopRow list per section group
+      Empty case list: "No cases listed for this court" gray-400 centered
+
+─────────────────────────────────
+MOBILE LAYOUT (< 768px)
+─────────────────────────────────
+
+Top controls strip (same as desktop but horizontal scroll if needed, sticky):
+  — date dropdown + [Appellate|Original] + [Daily|Monthly] toggles
+
+CourtTabBar (sticky just below top controls):
+  — Horizontally scrollable court pills
+
+Main area (scrolls):
+  CourtHeader (compact mobile version, same fields, jurisdiction collapsed)
+  Per section group:
+    SectionHeader (sticky z-10)
+    CaseMobileCard list
+
+─────────────────────────────────
+STATES
+─────────────────────────────────
+
+Loading (benches): skeleton rows in sidebar/tab bar (4 pills/items), skeleton CourtHeader block
+Loading (cases): 5 CaseMobileCard/CaseDesktopRow skeletons
+NOT SITTING court: CourtHeader shows "NOT SITTING" red badge, body shows: "Court not sitting today" red-500 centered, no cases rendered
+Empty case list: "No cases listed for this court" gray-400 centered with folder-open icon
+
+─────────────────────────────────
+SCREENS TO DESIGN (cause list only)
+─────────────────────────────────
+
+5a. Cause List — desktop, Appellate selected, Court 1 visible in sidebar, CourtHeader expanded with judges + jurisdiction open, cases in CaseDesktopRow format, Track + VC buttons visible
+5b. Cause List — mobile, CourtTabBar visible, Court 1 active tab, CourtHeader compact (jurisdiction collapsed), CaseMobileCard list, one card with Track and VC buttons
+5c. Cause List — mobile, empty state (no court selected, tab bar showing 4 courts as pills)
 
 ═══════════════════════════════════════
 SCREEN 6: SEARCH PAGE

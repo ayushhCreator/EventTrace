@@ -149,6 +149,9 @@ _LIST_TYPE_RE = re.compile(r"(DAILY|MONTHLY|SUPPLEMENTARY|SPECIAL)\s+CAUSELIST",
 _DATE_RE = re.compile(r"For\s+\w+\s+The\s+(\d+(?:st|nd|rd|th)?)\s+(\w+)\s+(\d{4})", re.IGNORECASE)
 _NOT_SITTING_RE = re.compile(r"NOT\s+SITTING\s+ON\s+([\d\.]+)", re.IGNORECASE)
 _VC_LINK_RE = re.compile(r"VC\s+LINK\s*:\s*(https?://\S+)", re.IGNORECASE)
+_AT_TIME_RE = re.compile(r"\bAT\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM|NOON|NOON\b))", re.IGNORECASE)
+_FLOOR_RE = re.compile(r"\b((?:FIRST|SECOND|THIRD|FOURTH|FIFTH|GROUND|\d+(?:ST|ND|RD|TH)?)\s+FLOOR)\b", re.IGNORECASE)
+_BUILDING_RE = re.compile(r"\b((?:MAIN|ANNEXE|ANNEX|NEW|OLD|NORTH|SOUTH|EAST|WEST)\s+BUILDING)\b", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1,
@@ -235,6 +238,9 @@ def parse_court_header(block: str) -> dict[str, Any]:
         "not_sitting": bool(_NOT_SITTING_RE.search(clean_block)),
         "vc_link": _first_group(_VC_LINK_RE, clean_block),
         "jurisdiction_notes": _extract_jurisdiction(clean_block),
+        "at_time": _first_group(_AT_TIME_RE, clean_block),
+        "floor": _first_group(_FLOOR_RE, clean_block),
+        "building": _first_group(_BUILDING_RE, clean_block),
     }
 
 
