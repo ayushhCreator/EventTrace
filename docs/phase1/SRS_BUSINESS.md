@@ -29,6 +29,7 @@
 10. [Risks and How We Handle Them](#10-risks-and-how-we-handle-them)
 11. [What Phase 2 Will Add](#11-what-phase-2-will-add)
 12. [Questions for Management Review](#12-questions-for-management-review)
+13. [Planning the Billing System — What We Must Decide Now](#13-planning-the-billing-system--what-we-must-decide-now)
 
 ---
 
@@ -502,6 +503,110 @@ The following questions are open for management to answer before or after Phase 
 12. Who are the first users we should onboard — our own team, specific advocates, or a public launch?
 13. Is there a specific launch date target for Phase 1?
 14. Should we build an admin panel to see how many users are signed up and which features they use?
+
+---
+
+## 13. Planning the Billing System — What We Must Decide Now
+
+This section covers a critical design question that will affect how Phase 2 is built. The decisions here do not block Phase 1 launch — but they must be answered before Phase 2 development begins.
+
+---
+
+### The Problem — We Do Not Know Who Our Users Are
+
+Right now, when someone signs up on EventTrace, all we capture is their phone number. That is enough for Phase 1 (tracking cases and getting email alerts). But when Phase 2 billing launches, we will need to know:
+- Is this person a Senior Counsel, a Junior, a Clerk, or a Client?
+- Which law firm do they belong to?
+- What is their Bar Enrollment Number?
+
+If we do not collect this in Phase 1, we will have hundreds of existing users with no role information. Asking them to re-fill their profiles later results in most not doing it — the data is effectively lost.
+
+**The fix is simple and low-cost:** add one optional screen after signup in Phase 1 asking "What best describes you?" with role choices. Users who skip it can fill it later from their profile. Most motivated users (advocates, clerks) will fill it immediately.
+
+---
+
+### The Hierarchy — How It Should Work
+
+The billing system is built around a role hierarchy within a law firm:
+
+```
+Solicitor / Managing Partner
+    └── Advocate on Record (AOR)
+            ├── Senior Counsel       (engaged per case, highest fee)
+            ├── Junior Counsel       (appears on behalf of AOR)
+            └── Clerk                (files papers, court runs, flat fee)
+    └── Client                       (added by AOR, not self-registered)
+```
+
+**Important:** A Client is never self-registered into a firm. A client signs up on EventTrace to track their own case — but they are linked to a matter only when the AOR adds them. They can never see fee structures or billing amounts.
+
+---
+
+### Two Ways to Build the Firm System
+
+#### Option A — Top-Down (Firm-First)
+
+An AOR or Solicitor creates a firm account. They invite juniors and clerks by phone number. Clients are added only when the AOR creates a matter for them.
+
+```
+Step 1: AOR signs up → creates Firm "Manna & Associates"
+Step 2: AOR invites Junior by phone → Junior gets SMS/email with invite link
+Step 3: AOR invites Clerk by phone → same process
+Step 4: AOR creates Matter "WPA/71/2026" for client Rupa Paul
+Step 5: Rupa Paul gets a link to view her case status — she cannot see billing
+```
+
+**Advantage:** Correct for how law chambers actually work. AOR controls everything.
+**Limitation:** Firm must exist before juniors or clerks can be added. Someone has to create the firm first.
+
+---
+
+#### Option B — Bottom-Up (Self-Select Role, Join via Invite Code)
+
+Anyone signs up and picks their own role. A firm admin shares an invite code. Users join the firm by entering the code.
+
+```
+Step 1: Junior signs up, picks "Junior Counsel," enters enrollment number
+Step 2: AOR creates firm, shares invite code "MANNA2026" via WhatsApp
+Step 3: Junior enters code → joins firm as Junior Counsel
+```
+
+**Advantage:** Users can sign up independently. Firm joining happens separately.
+**Limitation:** No control over who claims which role. Anyone could claim to be an AOR.
+
+---
+
+### Recommended Approach
+
+**Phase 1 (now):**
+- Add role selection at signup (optional, not blocking)
+- Add enrollment number field on profile page
+- Build a basic admin view so we can see who is signing up and what role they claim
+
+**Phase 2, first sprint — use Option A (top-down):**
+- AOR/Solicitor creates the firm
+- All invites flow from the firm admin outward
+- Clients are added per matter, not per firm
+- Enrollment numbers are self-declared — no verification in Phase 2 (add later)
+
+---
+
+### Key Decisions Management Must Make Before Phase 2 Build
+
+| # | Question | Why It Matters |
+|---|---|---|
+| 1 | Can one Junior Counsel work across multiple firms? | Changes the entire database design. Most Calcutta HC juniors work with one chamber — if so, keep it one firm per person (simpler). |
+| 2 | Who is allowed to create a firm account? | Only AOR/Solicitor, or any advocate? Controls who can invite others and manage billing. |
+| 3 | How are clients added — by AOR only, or can clients self-link to a matter? | Determines whether clients need to know their case number or if the AOR does it for them. |
+| 4 | Should clients ever see billing amounts? | Standard practice is no — client sees the invoice total, not the internal fee split between advocates. |
+| 5 | How do we handle a Junior who leaves a firm and joins another? | Their past billing entries stay with the old firm. Only future entries go to the new firm. |
+| 6 | Do we verify Bar Enrollment Numbers, or self-declared only? | Verification requires Bar Council API or manual check. Recommend self-declared for Phase 2, verified badge in Phase 3. |
+
+---
+
+> **Management Comments — Section 13:**
+>
+> _(Write your decisions on the questions above here. The answers to Q1 and Q3 are the most time-sensitive — they determine the Phase 2 database schema.)_
 
 ---
 
