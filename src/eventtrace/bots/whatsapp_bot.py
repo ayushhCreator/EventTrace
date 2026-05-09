@@ -16,7 +16,7 @@ Commands (same logic as Telegram bot):
 from __future__ import annotations
 
 import base64
-import logging
+import structlog
 from datetime import datetime, timezone as _tz
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -28,7 +28,7 @@ from ..db import DB
 
 _IST = ZoneInfo("Asia/Kolkata")
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 # ── Outbound sender ───────────────────────────────────────────────────────────

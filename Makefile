@@ -1,4 +1,5 @@
-.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape scheduler test
+.PHONY: db db-stop db-reset schema migrate-sqlite api monitor scrape scheduler test \
+        db-migrate db-migrate-dry db-stamp db-history db-downgrade
 
 # ── Local Postgres ────────────────────────────────────────────────────────────
 
@@ -20,6 +21,23 @@ pgadmin:
 schema:
 	@export $$(cat .env | grep -v '^#' | xargs) && \
 	  .venv/bin/python -c "from eventtrace.config import Settings; from eventtrace.db import get_db; db = get_db(Settings()); db.ensure_schema(); print('schema OK')"
+
+# ── Alembic migrations ────────────────────────────────────────────────────────
+
+db-migrate:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/alembic upgrade head
+
+db-migrate-dry:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/alembic upgrade head --sql
+
+db-stamp:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/alembic stamp head
+
+db-history:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/alembic history --verbose
+
+db-downgrade:
+	@export $$(cat .env | grep -v '^#' | xargs) && .venv/bin/alembic downgrade -1
 
 # ── Migrate existing SQLite data to Postgres ──────────────────────────────────
 

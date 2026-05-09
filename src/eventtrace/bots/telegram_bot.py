@@ -14,7 +14,7 @@ Env:  TELEGRAM_TOKEN=<bot_token>
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 import httpx
 from telegram import Update
@@ -24,7 +24,7 @@ from ..common.time import ist_today_str
 from ..config import Settings
 from ..db import DB
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 # ── Notification helper (called from run_monitor) ────────────────────────────
@@ -448,10 +448,8 @@ async def cmd_redirect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    from ..core.logging_setup import configure_logging
+    configure_logging()
     settings = Settings()
     if not settings.telegram_token:
         raise SystemExit("TELEGRAM_TOKEN not set")
