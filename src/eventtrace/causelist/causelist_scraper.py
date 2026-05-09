@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-import logging
 import re
 from datetime import date, datetime, timezone
 
-from playwright.async_api import async_playwright
+import structlog
 
 from ..config import Settings
 from ..db import DB
+from .causelist_parser import fetch_causelist_html, html_to_text
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # Matches: COURT NO. 1 ... VC LINK: https://...
 # Handles "COURT NO. 1", "COURT NO.1", "COURT NO : 1" etc.
@@ -54,33 +53,24 @@ def _extract_vc_links(text: str) -> dict[str, str]:
     return result
 
 
-async def scrape_vc_links(for_date: date, settings: Settings) -> dict[str, str]:
-    """Fetch cause list HTML and extract {room_no: zoom_url}. Returns empty dict if unavailable."""
+def scrape_vc_links(for_date: date, settings: Settings) -> dict[str, str]:
+    """Fetch cause list HTML and extract {room_no: zoom_url}.
+
+    This path intentionally avoids Playwright.
+    The cause-list URLs are static HTML and are more reliably fetched via
+    urllib3 (with legacy TLS handling) than a browser navigation.
+    Returns empty dict if unavailable.
+    """
+
+    # (settings currently unused, but kept in signature for backward compatibility)
+    _ = settings
+
     url = _causelist_url(for_date)
-    log.info("Fetching cause list for %s: %s", for_date, url)
+    html = fetch_causelist_html(for_date, timeout=120, url=url)
+    if not html:
+        return {}
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=settings.headless)
-        context = await browser.new_context()
-        page = await context.new_page()
-        try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            if response is None or response.status >= 400:
-                log.warning(
-                    "Cause list not available for %s (HTTP %s)",
-                    for_date,
-                    response and response.status,
-                )
-                return {}
-            # Get inner text — strips HTML tags, preserving whitespace structure
-            text = await page.inner_text("body")
-        except Exception as exc:
-            log.warning("Failed to fetch cause list for %s: %s", for_date, exc)
-            return {}
-        finally:
-            await context.close()
-            await browser.close()
-
+    text = html_to_text(html)
     links = _extract_vc_links(text)
     log.info("Found %d VC links for %s: courts %s", len(links), for_date, sorted(links.keys()))
     return links
@@ -88,7 +78,7 @@ async def scrape_vc_links(for_date: date, settings: Settings) -> dict[str, str]:
 
 def scrape_and_store_vc_links(for_date: date, settings: Settings, db: DB) -> dict[str, str]:
     """Sync wrapper: scrape VC links and persist to DB."""
-    links = asyncio.run(scrape_vc_links(for_date, settings))
+    links = scrape_vc_links(for_date, settings)
     date_str = for_date.isoformat()
     now = datetime.now(timezone.utc)
     for room_no, zoom_url in links.items():
@@ -100,7 +90,8 @@ def main() -> None:
     """CLI entry point: chd-scrape-vc [YYYY-MM-DD]"""
     import sys
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from ..core.logging_setup import configure_logging
+    configure_logging()
     from ..config import Settings
 
     settings = Settings()
@@ -115,6 +106,6 @@ def main() -> None:
         for_date = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
 
     links = scrape_and_store_vc_links(for_date, settings, db)
-    print(f"Scraped {len(links)} VC links for {for_date}:")
+    log.info("vc links scraped", date=str(for_date), count=len(links))
     for room_no, url in sorted(links.items(), key=lambda x: x[0].zfill(5)):
-        print(f"  Room {room_no}: {url}")
+        log.info("vc link", room=room_no, url=url)

@@ -12,14 +12,14 @@ Four combinations exist:
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
 from .base import CauseListSource, SourceResult
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _BASE = "https://calcuttahighcourt.gov.in/downloads/old_cause_lists"
 

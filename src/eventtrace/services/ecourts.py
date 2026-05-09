@@ -11,7 +11,7 @@ Flow:
 from __future__ import annotations
 
 import base64
-import logging
+import structlog
 import random
 import re
 import time
@@ -19,7 +19,7 @@ from typing import Any
 
 import requests
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _BASE = "https://hcservices.ecourts.gov.in/ecourtindiaHC"
 _PAGE_URL = f"{_BASE}/cases/case_no.php?state_cd=16&dist_cd=1&court_code=3&stateNm=Calcutta"

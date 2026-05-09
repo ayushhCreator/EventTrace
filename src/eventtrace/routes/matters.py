@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..routes.auth import _current_user
 from ..services.deps import get_db, get_settings
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 router = APIRouter(prefix="/matters", tags=["matters"])
 
 

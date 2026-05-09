@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
+import structlog
 from typing import Any
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _SNAPSHOT_FIELDS = [
     "serial_no",

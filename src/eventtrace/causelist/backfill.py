@@ -7,13 +7,13 @@ Usage:
 
 from __future__ import annotations
 
-import logging
+import structlog
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _FETCH_WORKERS = 6  # parallel HTTP fetches
 
@@ -102,7 +102,8 @@ def backfill_causelist(days: int = 7) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from ..core.logging_setup import configure_logging
+    configure_logging()
     args = sys.argv[1:]
     days = 7
     if "--days" in args:

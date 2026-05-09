@@ -6,12 +6,12 @@ Court publishes the *next working day's* list each evening.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from datetime import date
 
 from .base import CauseListSource, SourceResult
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 class AppellateStaticSource(CauseListSource):

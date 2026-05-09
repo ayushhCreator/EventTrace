@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import Any
 
 from ..common.time import ist_today_str
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _current_serial_from_row(row: dict) -> int | None:
@@ -24,9 +24,15 @@ def _current_serial_from_row(row: dict) -> int | None:
 def check_serial_alerts(db: Any, current_snapshot: list[dict]) -> None:
     today = ist_today_str()
 
+    try:
+        active_courts = db.get_courts_with_active_case_alerts(today)
+    except Exception as exc:
+        log.warning("get_courts_with_active_case_alerts failed: %s", exc)
+        return
+
     for row in current_snapshot:
         court_no = str(row.get("room_no", "")).strip()
-        if not court_no:
+        if not court_no or court_no not in active_courts:
             continue
 
         current_serial = _current_serial_from_row(row)

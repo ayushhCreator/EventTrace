@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import threading
 import time
 from datetime import date, datetime, timedelta
 from typing import Any
+
+import structlog
 
 from ..causelist.causelist_scraper import scrape_and_store_vc_links
 from .change_detector import apply_snapshot
@@ -13,7 +14,7 @@ from ..common.time import ist_now, ist_today_date, utc_now
 from ..config import Settings
 from ..db import get_db
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _build_court_id(row: dict[str, Any], key_fields: tuple[str, ...]) -> str:
@@ -412,20 +413,17 @@ def _start_api_thread(settings: Settings) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    from ..core.logging_setup import configure_logging
+    configure_logging()
+
     settings = Settings()
     db = get_db(settings)
     db.ensure_schema()
 
     from ..scraping.scraper import scrape_table_once_sync
 
-    print(f"Monitoring {settings.url}")
     db_label = settings.database_url or settings.db_path
-    print(f"DB: {db_label}")
-    print(f"Poll seconds: {settings.poll_seconds}")
+    log.info("monitor starting", url=settings.url, db=db_label, poll_seconds=settings.poll_seconds)
 
     # Optionally start API in background thread (set CHD_WITH_API=1)
     import os

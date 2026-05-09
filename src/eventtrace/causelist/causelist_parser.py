@@ -8,14 +8,15 @@ Returns structured dicts suitable for DB upsert.
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import date, datetime, timezone
 from typing import Any
 
+import structlog
+
 from bs4 import BeautifulSoup
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # ── URL ──────────────────────────────────────────────────────────────────────
 
@@ -554,7 +555,8 @@ def main() -> None:
     """CLI: chd-scrape-causelist [YYYY-MM-DD] [--store]"""
     import sys
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from ..core.logging_setup import configure_logging
+    configure_logging()
 
     from datetime import timedelta
     from ..config import Settings
@@ -570,19 +572,21 @@ def main() -> None:
 
     html = fetch_causelist_html(for_date)
     if not html:
-        print(f"No causelist available for {for_date}")
+        log.error("no causelist available", date=str(for_date))
         sys.exit(1)
 
     parsed = parse_causelist(html, for_date)
     total_cases = sum(len(c["cases"]) for c in parsed)
-    print(f"Parsed {len(parsed)} courts, {total_cases} cases for {for_date}")
+    log.info("causelist parsed", date=str(for_date), courts=len(parsed), cases=total_cases)
 
     for court in parsed:
         b = court["bench"]
-        print(
-            f"  Court {str(b['court_no'] or '?'):>4}  {len(court['cases']):>4} cases"
-            f"  {'NOT SITTING' if b['not_sitting'] else 'sitting':12}"
-            f"  judges: {', '.join(b['judges'][:2])}"
+        log.debug(
+            "court",
+            court_no=b["court_no"],
+            cases=len(court["cases"]),
+            status="NOT SITTING" if b["not_sitting"] else "sitting",
+            judges=b["judges"][:2],
         )
 
     if store:
@@ -592,4 +596,4 @@ def main() -> None:
         db = get_db(settings)
         db.ensure_schema()
         n = db.store_causelist(parsed)
-        print(f"Stored {n} cases to DB.")
+        log.info("causelist stored", cases=n)

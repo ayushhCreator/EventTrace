@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import logging
+import structlog
 import os
 from typing import Any
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _wati_key() -> str:

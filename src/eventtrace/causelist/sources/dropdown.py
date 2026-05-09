@@ -7,14 +7,14 @@ Provide the base URL and dropdown selectors via config.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from .base import CauseListSource, SourceResult
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 @dataclass

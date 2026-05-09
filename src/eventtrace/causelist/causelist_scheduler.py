@@ -12,14 +12,15 @@ Date logic: court publishes the *next working day's* list each evening.
 
 from __future__ import annotations
 
-import logging
 import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import structlog
+
 from ..common.time import IST, ist_now
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _WINDOWS_IST = ["20:30", "21:00", "21:30", "22:00"]
 
@@ -228,14 +229,11 @@ def run_scheduler(settings: Any, db: Any) -> None:
 
 def main() -> None:
     """CLI entry point: chd-schedule-causelist"""
-    import logging as _logging
+    from ..core.logging_setup import configure_logging
     from ..config import Settings
     from ..db import get_db
 
-    _logging.basicConfig(
-        level=_logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    configure_logging()
     settings = Settings()
     db = get_db(settings)
     db.ensure_schema()
