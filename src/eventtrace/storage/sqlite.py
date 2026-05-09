@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import logging
+import structlog
 import sqlite3
 from datetime import datetime
 from typing import Any
 
-from ..domain.models import EventTrace
-from .repositories.auth import SQLiteAuthRepository
-from .repositories.causelist import SQLiteCauselistRepository
-from .repositories.events import SQLiteEventsRepository
-from .repositories.subscriptions import SQLiteSubscriptionsRepository
-from .repositories.timeline import SQLiteTimelineRepository
+from sqlalchemy import create_engine
 
-log = logging.getLogger(__name__)
+from ..domain.models import EventTrace
+from .repositories.auth_alchemy import SQLAlchemyAuthRepository
+from .repositories.causelist_alchemy import SQLAlchemyCauselistRepository
+from .repositories.events_alchemy import SQLAlchemyEventsRepository
+from .repositories.subscriptions_alchemy import SQLAlchemySubscriptionsRepository
+from .repositories.timeline_alchemy import SQLAlchemyTimelineRepository
+
+log = structlog.get_logger()
 
 
 def _default_prefs() -> dict:
@@ -28,11 +30,12 @@ def _default_prefs() -> dict:
 class DB:
     def __init__(self, path: str) -> None:
         self.path = path
-        self._events = SQLiteEventsRepository(self.connect)
-        self._subscriptions = SQLiteSubscriptionsRepository(self.connect)
-        self._causelist = SQLiteCauselistRepository(self.connect)
-        self._auth = SQLiteAuthRepository(self.connect)
-        self._timeline = SQLiteTimelineRepository(self.connect)
+        self._engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
+        self._events = SQLAlchemyEventsRepository(self._engine)
+        self._subscriptions = SQLAlchemySubscriptionsRepository(self._engine)
+        self._causelist = SQLAlchemyCauselistRepository(self._engine)
+        self._auth = SQLAlchemyAuthRepository(self._engine)
+        self._timeline = SQLAlchemyTimelineRepository(self._engine)
 
     def connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path)
@@ -60,7 +63,8 @@ class DB:
                 CREATE TABLE IF NOT EXISTS current_state (
                   court_id TEXT PRIMARY KEY,
                   data_json TEXT NOT NULL,
-                  last_seen_time TEXT NOT NULL
+                  last_seen_time TEXT NOT NULL,
+                  source_court TEXT NOT NULL DEFAULT 'CHD'
                 );
 
                 CREATE TABLE IF NOT EXISTS field_state (
@@ -69,6 +73,7 @@ class DB:
                   value TEXT,
                   start_time TEXT NOT NULL,
                   last_seen_time TEXT NOT NULL,
+                  source_court TEXT NOT NULL DEFAULT 'CHD',
                   PRIMARY KEY (court_id, field_name)
                 );
 
@@ -81,13 +86,20 @@ class DB:
                   start_time TEXT NOT NULL,
                   end_time TEXT NOT NULL,
                   duration_seconds INTEGER NOT NULL,
-                  observed_time TEXT NOT NULL
+                  observed_time TEXT NOT NULL,
+                  source_court TEXT NOT NULL DEFAULT 'CHD'
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_event_trace_time
                   ON event_trace(observed_time DESC);
                 CREATE INDEX IF NOT EXISTS idx_event_trace_court
                   ON event_trace(court_id, observed_time DESC);
+                CREATE INDEX IF NOT EXISTS idx_event_trace_source_court
+                  ON event_trace(source_court, court_id, observed_time DESC);
+                CREATE INDEX IF NOT EXISTS idx_current_state_source_court
+                  ON current_state(source_court, court_id);
+                CREATE INDEX IF NOT EXISTS idx_field_state_source_court
+                  ON field_state(source_court, court_id, field_name);
 
                 CREATE TABLE IF NOT EXISTS vc_zoom_link (
                   date       TEXT NOT NULL,
@@ -139,6 +151,7 @@ class DB:
                   vc_link      TEXT,
                   jurisdiction TEXT,
                   scraped_at   TEXT NOT NULL,
+                  source_court TEXT NOT NULL DEFAULT 'CHD',
                   UNIQUE(list_date, court_no)
                 );
 
@@ -146,6 +159,8 @@ class DB:
                   ON causelist_bench(list_date);
                 CREATE INDEX IF NOT EXISTS idx_causelist_bench_court
                   ON causelist_bench(court_no, list_date);
+                CREATE INDEX IF NOT EXISTS idx_causelist_bench_source_court
+                  ON causelist_bench(source_court, list_date, court_no);
 
                 CREATE TABLE IF NOT EXISTS causelist_case (
                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -269,6 +284,11 @@ class DB:
                 "ALTER TABLE causelist_bench ADD COLUMN at_time TEXT",
                 "ALTER TABLE causelist_bench ADD COLUMN floor TEXT",
                 "ALTER TABLE causelist_bench ADD COLUMN building TEXT",
+                "ALTER TABLE causelist_bench ADD COLUMN source_court TEXT NOT NULL DEFAULT 'CHD'",
+                # multi-court support columns
+                "ALTER TABLE current_state ADD COLUMN source_court TEXT NOT NULL DEFAULT 'CHD'",
+                "ALTER TABLE field_state ADD COLUMN source_court TEXT NOT NULL DEFAULT 'CHD'",
+                "ALTER TABLE event_trace ADD COLUMN source_court TEXT NOT NULL DEFAULT 'CHD'",
                 # subscriptions
                 "ALTER TABLE subscriptions ADD COLUMN hearing_date TEXT",
                 "ALTER TABLE subscriptions ADD COLUMN contact_type TEXT NOT NULL DEFAULT 'telegram'",
@@ -384,6 +404,10 @@ class DB:
                       jurisdiction TEXT,
                       scraped_at   TEXT NOT NULL,
                       source_id    TEXT,
+                      at_time      TEXT,
+                      floor        TEXT,
+                      building     TEXT,
+                      source_court TEXT NOT NULL DEFAULT 'CHD',
                       UNIQUE(list_date, court_no, side, list_type)
                     );
                     INSERT OR IGNORE INTO causelist_bench
@@ -391,7 +415,9 @@ class DB:
                              COALESCE(side, 'APPELLATE SIDE'),
                              COALESCE(list_type, 'DAILY'),
                              judges_json, not_sitting, vc_link, jurisdiction, scraped_at,
-                             source_id
+                             source_id,
+                             at_time, floor, building,
+                             COALESCE(source_court, 'CHD')
                       FROM causelist_bench_old;
                     DROP TABLE causelist_bench_old;
                     PRAGMA legacy_alter_table = OFF;
@@ -420,6 +446,10 @@ class DB:
                       jurisdiction TEXT,
                       scraped_at   TEXT NOT NULL,
                       source_id    TEXT,
+                      at_time      TEXT,
+                      floor        TEXT,
+                      building     TEXT,
+                      source_court TEXT NOT NULL DEFAULT 'CHD',
                       UNIQUE(list_date, court_no, side, list_type)
                     );
 
@@ -428,7 +458,9 @@ class DB:
                              COALESCE(side, 'APPELLATE SIDE'),
                              COALESCE(list_type, 'DAILY'),
                              judges_json, not_sitting, vc_link, jurisdiction, scraped_at,
-                             source_id
+                             source_id,
+                             at_time, floor, building,
+                             COALESCE(source_court, 'CHD')
                       FROM causelist_bench_old;
 
                     DROP TABLE causelist_bench_old;
@@ -439,6 +471,8 @@ class DB:
                       ON causelist_bench(list_date);
                     CREATE INDEX IF NOT EXISTS idx_causelist_bench_court
                       ON causelist_bench(court_no, list_date);
+                    CREATE INDEX IF NOT EXISTS idx_causelist_bench_source_court
+                      ON causelist_bench(source_court, list_date, court_no);
                 """)
 
     # ── Events delegation ────────────────────────────────────────────────────
@@ -828,29 +862,10 @@ class DB:
             )
 
     def get_notification_prefs(self, user_id: str) -> dict:
-        with self.connect() as con:
-            row = con.execute(
-                "SELECT notification_prefs FROM users WHERE id=?",
-                (user_id,),
-            ).fetchone()
-        if not row or not row["notification_prefs"]:
-            return _default_prefs()
-        import json
-
-        try:
-            return {**_default_prefs(), **json.loads(row["notification_prefs"])}
-        except Exception:
-            return _default_prefs()
+        return self._auth.get_notification_prefs(user_id)
 
     def update_notification_prefs(self, user_id: str, prefs: dict) -> dict:
-        import json
-
-        with self.connect() as con:
-            con.execute(
-                "UPDATE users SET notification_prefs=? WHERE id=?",
-                (json.dumps(prefs), user_id),
-            )
-        return prefs
+        return self._auth.update_notification_prefs(user_id, prefs)
 
     # ── Timeline delegation ───────────────────────────────────────────────────
 

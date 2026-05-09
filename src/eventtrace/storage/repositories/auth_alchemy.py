@@ -1,0 +1,164 @@
+"""SQLAlchemy-based auth repository.
+
+Single implementation for both SQLite and PostgreSQL.
+Replaces SQLiteAuthRepository + PostgresAuthRepository.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Any
+
+from sqlalchemy import select, update
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from ...common.time import iso, utc_now
+from ..models import PhoneOtp, User
+
+
+def _user_to_dict(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "phone": user.phone,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "tier": user.tier,
+        "verified": user.verified,
+        "notification_prefs": user.notification_prefs,
+    }
+
+
+def _otp_to_dict(otp: PhoneOtp) -> dict:
+    return {
+        "id": otp.id,
+        "phone": otp.phone,
+        "otp_hash": otp.otp_hash,
+        "expires_at": otp.expires_at,
+        "attempts": otp.attempts,
+        "used": otp.used,
+    }
+
+
+_DEFAULT_PREFS = {
+    "whatsapp": True,
+    "email": True,
+    "serial_alerts": True,
+    "causelist_alerts": True,
+    "change_alerts": True,
+}
+
+
+class SQLAlchemyAuthRepository:
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def get_user_by_phone(self, phone: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.scalar(select(User).where(User.phone == phone))
+            return _user_to_dict(user) if user else None
+
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            return _user_to_dict(user) if user else None
+
+    def upsert_user(self, phone: str, name: str | None = None, email: str | None = None) -> dict:
+        with Session(self._engine) as session:
+            user = session.scalar(select(User).where(User.phone == phone))
+            if user:
+                if name and not user.name:
+                    user.name = name
+                if email and not user.email:
+                    user.email = email
+            else:
+                user = User(
+                    id=str(uuid.uuid4()),
+                    phone=phone,
+                    name=name,
+                    email=email,
+                    verified=0,
+                    created_at=iso(utc_now()),
+                )
+                session.add(user)
+            session.commit()
+            session.refresh(user)
+            return _user_to_dict(user)
+
+    def mark_user_verified(self, phone: str) -> None:
+        with Session(self._engine) as session:
+            session.execute(update(User).where(User.phone == phone).values(verified=1))
+            session.commit()
+
+    def save_otp(self, phone: str, otp_hash: str, expires_at: Any) -> None:
+        now = iso(utc_now())
+        if not isinstance(expires_at, str):
+            expires_at = iso(expires_at)
+        with Session(self._engine) as session:
+            otp = PhoneOtp(
+                phone=phone,
+                otp_hash=otp_hash,
+                expires_at=expires_at,
+                attempts=0,
+                used=0,
+                created_at=now,
+            )
+            session.add(otp)
+            session.commit()
+
+    def get_latest_otp(self, phone: str) -> dict | None:
+        with Session(self._engine) as session:
+            otp = session.scalar(
+                select(PhoneOtp)
+                .where(PhoneOtp.phone == phone, PhoneOtp.used == 0)
+                .order_by(PhoneOtp.id.desc())
+                .limit(1)
+            )
+            return _otp_to_dict(otp) if otp else None
+
+    def increment_otp_attempts(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(PhoneOtp, otp_id)
+            if otp:
+                otp.attempts += 1
+                session.commit()
+
+    def mark_otp_used(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(PhoneOtp, otp_id)
+            if otp:
+                otp.used = 1
+                session.commit()
+
+    def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if not user:
+                return None
+            if name is not None:
+                user.name = name
+            if email is not None:
+                user.email = email
+            session.commit()
+            session.refresh(user)
+            return _user_to_dict(user)
+
+    def get_notification_prefs(self, user_id: str) -> dict:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if not user or not user.notification_prefs:
+                return dict(_DEFAULT_PREFS)
+            try:
+                return {**_DEFAULT_PREFS, **json.loads(user.notification_prefs)}
+            except Exception:
+                return dict(_DEFAULT_PREFS)
+
+    def update_notification_prefs(self, user_id: str, prefs: dict) -> dict:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if user:
+                user.notification_prefs = json.dumps(prefs)
+                session.commit()
+        return prefs

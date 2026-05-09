@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import logging
+import structlog
 import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Generator
 
-from ..domain.models import EventTrace
-from .repositories.auth import PostgresAuthRepository
-from .repositories.causelist import PostgresCauselistRepository
-from .repositories.events import PostgresEventsRepository
-from .repositories.subscriptions import PostgresSubscriptionsRepository
-from .repositories.timeline import PostgresTimelineRepository
+from sqlalchemy import create_engine
 
-log = logging.getLogger(__name__)
+from ..domain.models import EventTrace
+from .repositories.auth_alchemy import SQLAlchemyAuthRepository
+from .repositories.causelist_alchemy import SQLAlchemyCauselistRepository
+from .repositories.events_alchemy import SQLAlchemyEventsRepository
+from .repositories.subscriptions_alchemy import SQLAlchemySubscriptionsRepository
+from .repositories.timeline_alchemy import SQLAlchemyTimelineRepository
+
+log = structlog.get_logger()
 
 
 def _default_prefs() -> dict:
@@ -37,11 +39,14 @@ class PostgresDB:
         self._dsn = dsn
         self._pool = None
         self._pool_lock = threading.Lock()
-        self._events = PostgresEventsRepository(self._cursor)
-        self._subscriptions = PostgresSubscriptionsRepository(self._cursor)
-        self._causelist = PostgresCauselistRepository(self._cursor)
-        self._auth = PostgresAuthRepository(self._cursor)
-        self._timeline = PostgresTimelineRepository(self._cursor)
+        # SQLAlchemy 2.0 requires "postgresql://" not "postgres://" (Railway uses the latter)
+        _sa_url = dsn.replace("postgres://", "postgresql://", 1) if dsn.startswith("postgres://") else dsn
+        self._engine = create_engine(_sa_url, pool_size=5, max_overflow=10)
+        self._events = SQLAlchemyEventsRepository(self._engine)
+        self._subscriptions = SQLAlchemySubscriptionsRepository(self._engine)
+        self._causelist = SQLAlchemyCauselistRepository(self._engine)
+        self._auth = SQLAlchemyAuthRepository(self._engine)
+        self._timeline = SQLAlchemyTimelineRepository(self._engine)
 
     def _get_pool(self):
         if self._pool is not None:
@@ -835,30 +840,10 @@ class PostgresDB:
             )
 
     def get_notification_prefs(self, user_id: str) -> dict:
-        import json
-
-        with self._cursor() as cur:
-            cur.execute(
-                "SELECT notification_prefs FROM users WHERE id=%s",
-                (user_id,),
-            )
-            row = cur.fetchone()
-        if not row or not row["notification_prefs"]:
-            return _default_prefs()
-        try:
-            return {**_default_prefs(), **json.loads(row["notification_prefs"])}
-        except Exception:
-            return _default_prefs()
+        return self._auth.get_notification_prefs(user_id)
 
     def update_notification_prefs(self, user_id: str, prefs: dict) -> dict:
-        import json
-
-        with self._cursor() as cur:
-            cur.execute(
-                "UPDATE users SET notification_prefs=%s WHERE id=%s",
-                (json.dumps(prefs), user_id),
-            )
-        return prefs
+        return self._auth.update_notification_prefs(user_id, prefs)
 
     # ── Timeline delegation ───────────────────────────────────────────────────
 
