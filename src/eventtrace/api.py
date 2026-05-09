@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
-import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .config import Settings
 from .db import get_db
@@ -20,26 +23,37 @@ from .routes.my_cases import router as my_cases_router, timeline_router
 from .routes.ui import router as ui_router
 from .routes.webhooks import router as webhooks_router
 
+limiter = Limiter(key_func=get_remote_address)
+
 
 def create_app() -> FastAPI:
     settings = Settings()
     db = get_db(settings)
 
-    app = FastAPI(title="CHD EventTrace", version="0.2.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        db.ensure_schema()
+        yield
+
+    app = FastAPI(title="CHD EventTrace", version="0.2.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # Run schema migrations in background so /health responds immediately on startup.
-    threading.Thread(target=db.ensure_schema, daemon=True, name="ensure-schema").start()
-
-    _extra = [o.strip() for o in os.getenv("CHD_CORS_ORIGINS", "").split(",") if o.strip()]
-    _origins = [
+    _default_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://eventtrace.vercel.app",
         "https://event-trace-web.vercel.app",
-        *_extra,
+        "https://eventtrace.web.app",
+        "https://eventtrace.firebaseapp.com",
+        "https://eventtrace.in",
+        "https://www.eventtrace.in",
     ]
+    _extra = [o.strip() for o in os.getenv("CHD_CORS_ORIGINS", "").split(",") if o.strip()]
+    _origins = _default_origins + _extra
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
@@ -65,10 +79,11 @@ def create_app() -> FastAPI:
 
 
 def main() -> None:
+    from .core.logging_setup import configure_logging
+    configure_logging()
+
     import uvicorn
 
-    # Default 0.0.0.0 so Railway/Docker healthchecks can reach the process.
-    # Override with CHD_API_HOST=127.0.0.1 locally if needed.
     host = os.getenv("CHD_API_HOST", "0.0.0.0")
     port = int(os.getenv("PORT") or os.getenv("CHD_API_PORT", "8009"))
     reload_env = os.getenv("CHD_API_RELOAD", "0").strip().lower()

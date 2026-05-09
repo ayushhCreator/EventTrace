@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e . --no-build-isolation || true
+
+COPY src/ src/
+RUN pip install --no-cache-dir -e .
+
+COPY scripts/ scripts/
+RUN chmod +x scripts/*.sh
+
+ENV CHD_API_HOST=0.0.0.0
+ENV CHD_API_PORT=8080
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8080
+
+CMD ["scripts/start-api.sh"]

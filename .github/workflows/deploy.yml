@@ -1,0 +1,193 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-south1
+  AR_HOST: asia-south1-docker.pkg.dev
+  # Artifact Registry repo: GCP console → Artifact Registry → create repo named "eventtrace"
+  AR_REPO: asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/eventtrace
+  # Cloud SQL instance connection name: PROJECT:REGION:INSTANCE
+  # Get from: gcloud sql instances describe eventtrace-pg --format='value(connectionName)'
+  SQL_CONN: ${{ secrets.GCP_PROJECT_ID }}:asia-south1:eventtrace-pg
+
+jobs:
+  # ── 1. Build & push backend images ──────────────────────────────────────────
+  build-backend:
+    name: Build & push API + Scraper images
+    runs-on: ubuntu-latest
+    outputs:
+      api-image: ${{ steps.tags.outputs.api }}
+      scraper-image: ${{ steps.tags.outputs.scraper }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
+
+      - name: Set image tags
+        id: tags
+        run: |
+          SHA=${GITHUB_SHA::8}
+          echo "api=${{ env.AR_REPO }}/api:${SHA}" >> "$GITHUB_OUTPUT"
+          echo "scraper=${{ env.AR_REPO }}/scraper:${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push API image
+        run: |
+          docker build -f Dockerfile.api -t ${{ steps.tags.outputs.api }} .
+          docker push ${{ steps.tags.outputs.api }}
+
+      - name: Build & push Scraper image
+        run: |
+          docker build -f Dockerfile.scraper -t ${{ steps.tags.outputs.scraper }} .
+          docker push ${{ steps.tags.outputs.scraper }}
+
+  # ── 2. Run Alembic migrations ────────────────────────────────────────────────
+  migrate:
+    name: Run alembic upgrade head
+    runs-on: ubuntu-latest
+    needs: build-backend
+
+    steps:
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # Create or update the migration job, then execute it synchronously.
+      # Cloud SQL Auth Proxy is not needed when using a Cloud SQL connector
+      # URL (postgres+pg8000://...) or when the Cloud Run service account has
+      # Cloud SQL Client role and DATABASE_URL uses the /cloudsql/ socket path.
+      - name: Deploy migration Cloud Run Job
+        run: |
+          gcloud run jobs deploy eventtrace-migrate \
+            --image ${{ needs.build-backend.outputs.api-image }} \
+            --region ${{ env.REGION }} \
+            --command alembic \
+            --args "upgrade,head" \
+            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-secrets DATABASE_URL=DATABASE_URL:latest \
+            --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Execute migration (wait for completion)
+        run: |
+          gcloud run jobs execute eventtrace-migrate \
+            --region ${{ env.REGION }} \
+            --wait \
+            --project ${{ env.PROJECT_ID }}
+
+  # ── 3. Deploy Cloud Run services ────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy API, Monitor, Scheduler
+    runs-on: ubuntu-latest
+    needs: [build-backend, migrate]
+
+    steps:
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy API service
+        run: |
+          gcloud run deploy eventtrace-api \
+            --image ${{ needs.build-backend.outputs.api-image }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --min-instances 0 \
+            --max-instances 5 \
+            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-secrets \
+              DATABASE_URL=DATABASE_URL:latest,\
+              JWT_SECRET=JWT_SECRET:latest,\
+              MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,\
+              MSG91_TEMPLATE_ID=MSG91_TEMPLATE_ID:latest,\
+              OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest \
+            --set-env-vars CHD_API_HOST=0.0.0.0,CHD_API_PORT=8080 \
+            --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Deploy Monitor service
+        run: |
+          gcloud run deploy eventtrace-monitor \
+            --image ${{ needs.build-backend.outputs.scraper-image }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --command scripts/start-monitor.sh \
+            --min-instances 1 \
+            --max-instances 1 \
+            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-secrets \
+              DATABASE_URL=DATABASE_URL:latest \
+            --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Deploy Scheduler service
+        run: |
+          gcloud run deploy eventtrace-scheduler \
+            --image ${{ needs.build-backend.outputs.scraper-image }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --command scripts/start-scheduler.sh \
+            --min-instances 1 \
+            --max-instances 1 \
+            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-secrets \
+              DATABASE_URL=DATABASE_URL:latest \
+            --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
+            --project ${{ env.PROJECT_ID }}
+
+  # ── 4. Build & deploy frontend to Firebase Hosting ──────────────────────────
+  deploy-web:
+    name: Deploy frontend to Firebase Hosting
+    runs-on: ubuntu-latest
+    # Can run in parallel with backend deploy (no dependency after build-backend)
+    needs: build-backend
+
+    steps:
+      # Checkout the frontend repo (separate GitHub repo)
+      # IMPORTANT: set secrets.WEB_REPO to "your-org/EventTrace-Web"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.WEB_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: web
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+        working-directory: web
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: ${{ secrets.GCP_PROJECT_ID }}
+          entryPoint: web
