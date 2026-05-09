@@ -82,6 +82,8 @@ class Settings:
         self.anthropic_api_key = _get_env("ANTHROPIC_API_KEY", "") or None
         # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
         self.jwt_secret = _get_env("JWT_SECRET", "change-me-in-production")
+        # HMAC secret for OTP hashing — generate same way as JWT_SECRET
+        self.otp_hmac_secret = _get_env("OTP_HMAC_SECRET", "")
         _default_secret = "change-me-in-production"
         _is_prod = bool(self.database_url or self.msg91_auth_key)
         if self.jwt_secret == _default_secret:

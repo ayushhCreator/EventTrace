@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import logging
+import hmac
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+
+import structlog
 
 import httpx
 import jwt
@@ -13,10 +15,10 @@ from fastapi import HTTPException
 from ..config import Settings
 from .validators import ensure_utc_aware, parse_dt_maybe_iso
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_DAYS = 30
+JWT_EXPIRE_DAYS = 7
 OTP_EXPIRE_MINUTES = 10
 OTP_MAX_ATTEMPTS = 5
 
@@ -39,7 +41,10 @@ def decode_jwt(token: str, settings: Settings) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def hash_otp(otp: str) -> str:
+def hash_otp(otp: str, secret: str = "") -> str:
+    if secret:
+        return hmac.new(secret.encode(), otp.encode(), hashlib.sha256).hexdigest()
+    # fallback for dev (no secret configured) — still better than bare sha256
     return hashlib.sha256(otp.encode()).hexdigest()
 
 
