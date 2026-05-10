@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import threading
 import time
+
+from ..core.health import start_health_server
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -415,6 +417,7 @@ def _start_api_thread(settings: Settings) -> None:
 def main() -> None:
     from ..core.logging_setup import configure_logging
     configure_logging()
+    start_health_server()
 
     settings = Settings()
     db = get_db(settings)

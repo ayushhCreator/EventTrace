@@ -19,6 +19,7 @@ from typing import Any
 import structlog
 
 from ..common.time import IST, ist_now
+from ..core.health import start_health_server
 
 log = structlog.get_logger()
 
@@ -234,6 +235,7 @@ def main() -> None:
     from ..db import get_db
 
     configure_logging()
+    start_health_server()
     settings = Settings()
     db = get_db(settings)
     db.ensure_schema()

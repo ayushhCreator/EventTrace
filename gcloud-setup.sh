@@ -13,7 +13,7 @@ REGION="asia-south1"                      # Mumbai — closest to India
 SQL_INSTANCE="supersahayak-pg"
 SQL_DB="supersahayak"
 SQL_USER="supersahayak"
-SQL_PASSWORD="changeme-use-a-real-secret" # also stored in Secret Manager below
+SQL_PASSWORD="FILL_IN_BEFORE_RUNNING" # never commit real value — stored in Secret Manager
 FIREBASE_PROJECT_ID="${PROJECT_ID}"
 # ─────────────────────────────────────────────────────────────────────────────
 
