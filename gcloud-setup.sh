@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# GCP one-time setup script for EventTrace
+# GCP one-time setup script for SuperSahayak Legal
 # Run locally: bash gcloud-setup.sh
 # Prerequisites: gcloud CLI installed + authenticated (gcloud auth login)
 #
-# Fill in the variables below before running.
+# Fill in SQL_PASSWORD before running.
 
 set -euo pipefail
 
 # ── EDIT THESE ────────────────────────────────────────────────────────────────
 PROJECT_ID="supersahayak"
 REGION="asia-south1"                      # Mumbai — closest to India
-SQL_INSTANCE="eventtrace-pg"
-SQL_DB="eventtrace"
-SQL_USER="eventtrace"
-SQL_PASSWORD="changeme-use-a-real-secret" # also store this in Secret Manager below
-FIREBASE_PROJECT_ID="${PROJECT_ID}"       # usually same as GCP project ID
+SQL_INSTANCE="supersahayak-pg"
+SQL_DB="supersahayak"
+SQL_USER="supersahayak"
+SQL_PASSWORD="changeme-use-a-real-secret" # also stored in Secret Manager below
+FIREBASE_PROJECT_ID="${PROJECT_ID}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "==> Setting active project: ${PROJECT_ID}"
@@ -33,10 +33,10 @@ gcloud services enable \
 
 # ── Artifact Registry ─────────────────────────────────────────────────────────
 echo "==> Creating Artifact Registry repo…"
-gcloud artifacts repositories create eventtrace \
+gcloud artifacts repositories create supersahayak \
   --repository-format docker \
   --location "${REGION}" \
-  --description "EventTrace container images" \
+  --description "SuperSahayak Legal container images" \
   || echo "(already exists, skipping)"
 
 # ── Cloud SQL PostgreSQL 16 ───────────────────────────────────────────────────
@@ -65,23 +65,20 @@ DATABASE_URL="postgresql://${SQL_USER}:${SQL_PASSWORD}@/${SQL_DB}?host=/cloudsql
 # ── Service Accounts ──────────────────────────────────────────────────────────
 echo "==> Creating service accounts…"
 
-# Deploy SA: used by GitHub Actions to push images + deploy Cloud Run
-gcloud iam service-accounts create eventtrace-deploy \
-  --display-name "EventTrace CI/CD deploy" \
+gcloud iam service-accounts create supersahayak-deploy \
+  --display-name "SuperSahayak CI/CD deploy" \
   || echo "(already exists)"
 
-# Runtime SA: used by Cloud Run services at runtime
-gcloud iam service-accounts create eventtrace-runtime \
-  --display-name "EventTrace Cloud Run runtime" \
+gcloud iam service-accounts create supersahayak-runtime \
+  --display-name "SuperSahayak Cloud Run runtime" \
   || echo "(already exists)"
 
-DEPLOY_SA="eventtrace-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
-RUNTIME_SA="eventtrace-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+DEPLOY_SA="supersahayak-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
+RUNTIME_SA="supersahayak-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # ── IAM bindings ─────────────────────────────────────────────────────────────
 echo "==> Granting IAM roles…"
 
-# Deploy SA roles (GitHub Actions)
 for ROLE in \
   roles/run.admin \
   roles/artifactregistry.writer \
@@ -93,7 +90,6 @@ for ROLE in \
     --role "${ROLE}" --quiet
 done
 
-# Runtime SA roles (Cloud Run services)
 for ROLE in \
   roles/secretmanager.secretAccessor \
   roles/cloudsql.client; do
@@ -102,14 +98,12 @@ for ROLE in \
     --role "${ROLE}" --quiet
 done
 
-# Allow deploy SA to act as runtime SA (needed for --service-account flag)
 gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
   --member "serviceAccount:${DEPLOY_SA}" \
   --role roles/iam.serviceAccountUser --quiet
 
 # ── Secret Manager ────────────────────────────────────────────────────────────
 echo "==> Creating secrets in Secret Manager…"
-echo "    (edit values before storing — or update via GCP console)"
 
 create_secret() {
   local NAME=$1
@@ -124,8 +118,8 @@ create_secret() {
 }
 
 create_secret "DATABASE_URL"        "${DATABASE_URL}"
-create_secret "JWT_SECRET"          "REPLACE_WITH_$(openssl rand -hex 32)"
-create_secret "OTP_HMAC_SECRET"     "REPLACE_WITH_$(openssl rand -hex 32)"
+create_secret "JWT_SECRET"          "$(openssl rand -hex 32)"
+create_secret "OTP_HMAC_SECRET"     "$(openssl rand -hex 32)"
 create_secret "MSG91_AUTH_KEY"      "REPLACE_WITH_MSG91_AUTH_KEY"
 create_secret "MSG91_TEMPLATE_ID"   "REPLACE_WITH_MSG91_TEMPLATE_ID"
 
@@ -144,18 +138,18 @@ echo "      --iam-account ${DEPLOY_SA}"
 echo "    cat /tmp/deploy-key.json   # paste this as GCP_SA_KEY"
 echo "    rm /tmp/deploy-key.json    # delete after copying"
 echo ""
-echo "  VITE_API_URL       = (Cloud Run API service URL — set after first deploy)"
+echo "  VITE_API_URL       = https://api.supersahayak.com  (update after first deploy)"
 echo "  WEB_REPO           = your-github-org/EventTrace-Web"
-echo "  FIREBASE_SERVICE_ACCOUNT = (see Firebase console → Project settings → Service accounts)"
+echo "  FIREBASE_SERVICE_ACCOUNT = (Firebase console → Project settings → Service accounts → Generate key)"
 echo ""
-echo "  Cloud SQL instance connection name (for --add-cloudsql-instances):"
+echo "  Cloud SQL connection name (for --add-cloudsql-instances):"
 echo "    ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
 echo ""
 echo "════════════════════════════════════════════════════════════════"
-echo "  Firebase: run these once locally after gcloud setup:"
+echo "  Firebase: run once locally:"
 echo "    npm install -g firebase-tools"
 echo "    firebase login"
 echo "    cd /path/to/EventTrace-Web"
-echo "    firebase init hosting   # select existing project: ${FIREBASE_PROJECT_ID}"
-echo "    # choose dist/ as public dir, yes to SPA rewrite"
+echo "    firebase init hosting   # project: ${FIREBASE_PROJECT_ID}"
+echo "    # public dir: dist  |  SPA rewrite: yes"
 echo "════════════════════════════════════════════════════════════════"

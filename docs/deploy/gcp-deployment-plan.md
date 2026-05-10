@@ -34,17 +34,17 @@ Split single Dockerfile into three images:
 GitHub Actions workflow (`.github/workflows/deploy.yml`) — 4 jobs:
 1. `build-backend` — build + push `api` and `scraper` images to Artifact Registry
 2. `migrate` — deploys + executes `eventtrace-migrate` Cloud Run Job (`alembic upgrade head`) against Cloud SQL via Unix socket
-3. `deploy-backend` — deploys `eventtrace-api`, `eventtrace-monitor`, `eventtrace-scheduler` with secrets from Secret Manager
+3. `deploy-backend` — deploys `supersahayak-api`, `eventtrace-monitor`, `eventtrace-scheduler` with secrets from Secret Manager
 4. `deploy-web` — checks out EventTrace-Web repo, `npm run build`, deploys to Firebase Hosting
 
 Cloud SQL connection uses Unix socket (`/cloudsql/PROJECT:REGION:INSTANCE`) — no proxy needed. `--add-cloudsql-instances` flag wired on all four Cloud Run services.
 
 ### 5. CORS updated for Firebase Hosting
-Added to `api.py` defaults: `eventtrace.web.app`, `eventtrace.firebaseapp.com`, `eventtrace.in`, `www.eventtrace.in`.
+Added to `api.py` defaults: `supersahayak.web.app`, `eventtrace.firebaseapp.com`, `legal.supersahayak.com`, `www.legal.supersahayak.com`.
 Existing `CHD_CORS_ORIGINS` env var still works for arbitrary additions.
 
 ### 6. Frontend deploy config (EventTrace-Web)
-- `.env.production` — `VITE_API_URL=https://api.eventtrace.in`
+- `.env.production` — `VITE_API_URL=https://api.legal.supersahayak.com`
 - `firebase.json` — SPA rewrites + asset cache headers
 - `nginx.conf` — for Cloud Run alternative hosting (SPA routing + gzip)
 
@@ -98,10 +98,10 @@ Existing `CHD_CORS_ORIGINS` env var still works for arbitrary additions.
 | What | Where |
 |------|-------|
 | Enable billing on project | Billing → link account |
-| Verify Cloud SQL instance is running | SQL → eventtrace-pg |
+| Verify Cloud SQL instance is running | SQL → supersahayak-pg |
 | First manual migration run (before first deploy) | Cloud Run Jobs → eventtrace-migrate → Execute |
-| Map custom domain `eventtrace.in` to Firebase Hosting | Firebase console → Hosting → Add custom domain |
-| Map `api.eventtrace.in` to Cloud Run API service | Cloud Run → eventtrace-api → Manage Custom Domains |
+| Map custom domain `legal.supersahayak.com` to Firebase Hosting | Firebase console → Hosting → Add custom domain |
+| Map `api.legal.supersahayak.com` to Cloud Run API service | Cloud Run → supersahayak-api → Manage Custom Domains |
 | Firebase project: add Google Analytics (optional) | Firebase console |
 
 ### In GitHub (one-time)
@@ -113,7 +113,7 @@ Go to repo Settings → Secrets and variables → Actions → New repository sec
 | `GCP_PROJECT_ID` | your GCP project ID |
 | `GCP_SA_KEY` | JSON from deploy service account key |
 | `GCP_RUN_SA_EMAIL` | `eventtrace-runtime@PROJECT_ID.iam.gserviceaccount.com` |
-| `VITE_API_URL` | Cloud Run API URL (get after first deploy) — or `https://api.eventtrace.in` if custom domain ready |
+| `VITE_API_URL` | Cloud Run API URL (get after first deploy) — or `https://api.legal.supersahayak.com` if custom domain ready |
 | `WEB_REPO` | `your-github-username/EventTrace-Web` |
 | `FIREBASE_SERVICE_ACCOUNT` | Firebase service account JSON (Firebase console → Project Settings → Service Accounts → Generate new private key) |
 
@@ -121,7 +121,7 @@ Go to repo Settings → Secrets and variables → Actions → New repository sec
 
 1. Get API service URL:
    ```bash
-   gcloud run services describe eventtrace-api --region asia-south1 --format 'value(status.url)'
+   gcloud run services describe supersahayak-api --region asia-south1 --format 'value(status.url)'
    ```
 2. Set `VITE_API_URL` GitHub secret to that URL (or your custom domain once mapped)
 3. Push any commit to trigger a re-deploy — now the frontend will point to the live API

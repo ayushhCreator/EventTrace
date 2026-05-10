@@ -8,11 +8,11 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: asia-south1
   AR_HOST: asia-south1-docker.pkg.dev
-  # Artifact Registry repo: GCP console → Artifact Registry → create repo named "eventtrace"
-  AR_REPO: asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/eventtrace
-  # Cloud SQL instance connection name: PROJECT:REGION:INSTANCE
-  # Get from: gcloud sql instances describe eventtrace-pg --format='value(connectionName)'
-  SQL_CONN: ${{ secrets.GCP_PROJECT_ID }}:asia-south1:eventtrace-pg
+  # Artifact Registry repo: asia-south1-docker.pkg.dev/supersahayak/supersahayak
+  AR_REPO: asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/supersahayak
+  # Cloud SQL connection name — get via:
+  # gcloud sql instances describe supersahayak-pg --format='value(connectionName)'
+  SQL_CONN: ${{ secrets.GCP_PROJECT_ID }}:asia-south1:supersahayak-pg
 
 jobs:
   # ── 1. Build & push backend images ──────────────────────────────────────────
@@ -63,13 +63,9 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      # Create or update the migration job, then execute it synchronously.
-      # Cloud SQL Auth Proxy is not needed when using a Cloud SQL connector
-      # URL (postgres+pg8000://...) or when the Cloud Run service account has
-      # Cloud SQL Client role and DATABASE_URL uses the /cloudsql/ socket path.
       - name: Deploy migration Cloud Run Job
         run: |
-          gcloud run jobs deploy eventtrace-migrate \
+          gcloud run jobs deploy supersahayak-migrate \
             --image ${{ needs.build-backend.outputs.api-image }} \
             --region ${{ env.REGION }} \
             --command alembic \
@@ -81,7 +77,7 @@ jobs:
 
       - name: Execute migration (wait for completion)
         run: |
-          gcloud run jobs execute eventtrace-migrate \
+          gcloud run jobs execute supersahayak-migrate \
             --region ${{ env.REGION }} \
             --wait \
             --project ${{ env.PROJECT_ID }}
@@ -100,7 +96,7 @@ jobs:
 
       - name: Deploy API service
         run: |
-          gcloud run deploy eventtrace-api \
+          gcloud run deploy supersahayak-api \
             --image ${{ needs.build-backend.outputs.api-image }} \
             --region ${{ env.REGION }} \
             --platform managed \
@@ -121,7 +117,7 @@ jobs:
 
       - name: Deploy Monitor service
         run: |
-          gcloud run deploy eventtrace-monitor \
+          gcloud run deploy supersahayak-monitor \
             --image ${{ needs.build-backend.outputs.scraper-image }} \
             --region ${{ env.REGION }} \
             --platform managed \
@@ -137,7 +133,7 @@ jobs:
 
       - name: Deploy Scheduler service
         run: |
-          gcloud run deploy eventtrace-scheduler \
+          gcloud run deploy supersahayak-scheduler \
             --image ${{ needs.build-backend.outputs.scraper-image }} \
             --region ${{ env.REGION }} \
             --platform managed \
@@ -155,12 +151,9 @@ jobs:
   deploy-web:
     name: Deploy frontend to Firebase Hosting
     runs-on: ubuntu-latest
-    # Can run in parallel with backend deploy (no dependency after build-backend)
     needs: build-backend
 
     steps:
-      # Checkout the frontend repo (separate GitHub repo)
-      # IMPORTANT: set secrets.WEB_REPO to "your-org/EventTrace-Web"
       - uses: actions/checkout@v4
         with:
           repository: ${{ secrets.WEB_REPO }}

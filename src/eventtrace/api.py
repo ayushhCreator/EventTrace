@@ -44,12 +44,10 @@ def create_app() -> FastAPI:
     _default_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://eventtrace.vercel.app",
-        "https://event-trace-web.vercel.app",
-        "https://eventtrace.web.app",
-        "https://eventtrace.firebaseapp.com",
-        "https://eventtrace.in",
-        "https://www.eventtrace.in",
+        "https://supersahayak.web.app",
+        "https://supersahayak.firebaseapp.com",
+        "https://legal.supersahayak.com",
+        "https://www.legal.supersahayak.com",
     ]
     _extra = [o.strip() for o in os.getenv("CHD_CORS_ORIGINS", "").split(",") if o.strip()]
     _origins = _default_origins + _extra
