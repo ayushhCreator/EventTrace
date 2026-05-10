@@ -65,7 +65,7 @@ jobs:
             --region ${{ env.REGION }} \
             --command alembic \
             --args "upgrade,head" \
-            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-cloudsql-instances ${{ env.SQL_CONN }} \
             --set-secrets DATABASE_URL=DATABASE_URL:latest \
             --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
             --project ${{ env.PROJECT_ID }}
@@ -100,7 +100,7 @@ jobs:
             --port 8080 \
             --min-instances 0 \
             --max-instances 5 \
-            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-cloudsql-instances ${{ env.SQL_CONN }} \
             --set-secrets \
               DATABASE_URL=DATABASE_URL:latest,\
               JWT_SECRET=JWT_SECRET:latest,\
@@ -122,7 +122,7 @@ jobs:
             --command scripts/start-monitor.sh \
             --min-instances 1 \
             --max-instances 1 \
-            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-cloudsql-instances ${{ env.SQL_CONN }} \
             --set-secrets \
               DATABASE_URL=DATABASE_URL:latest \
             --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
@@ -139,7 +139,7 @@ jobs:
             --command scripts/start-scheduler.sh \
             --min-instances 1 \
             --max-instances 1 \
-            --add-cloudsql-instances ${{ env.SQL_CONN }} \
+            --set-cloudsql-instances ${{ env.SQL_CONN }} \
             --set-secrets \
               DATABASE_URL=DATABASE_URL:latest \
             --service-account ${{ secrets.GCP_RUN_SA_EMAIL }} \
