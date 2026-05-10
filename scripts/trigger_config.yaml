@@ -1,0 +1,10 @@
+name: supersahayak-deploy
+github:
+  owner: ayushhCreator
+  name: EventTrace
+  push:
+    branch: ^main$
+filename: cloudbuild.yaml
+substitutions:
+  _RUN_SA: supersahayak-run-sa@supersahayak.iam.gserviceaccount.com
+  _VITE_API_URL: https://placeholder.run.app
