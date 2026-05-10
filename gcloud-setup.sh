@@ -43,6 +43,7 @@ gcloud artifacts repositories create eventtrace \
 echo "==> Creating Cloud SQL instance (takes ~5 min)…"
 gcloud sql instances create "${SQL_INSTANCE}" \
   --database-version POSTGRES_16 \
+  --edition ENTERPRISE \
   --tier db-f1-micro \
   --region "${REGION}" \
   --storage-type SSD \
