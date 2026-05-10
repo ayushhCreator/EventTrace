@@ -46,6 +46,8 @@ def create_app() -> FastAPI:
         "http://127.0.0.1:5173",
         "https://supersahayak.web.app",
         "https://supersahayak.firebaseapp.com",
+        "https://legalsupersahayak.web.app",
+        "https://legalsupersahayak.firebaseapp.com",
         "https://legal.supersahayak.com",
         "https://www.legal.supersahayak.com",
     ]
