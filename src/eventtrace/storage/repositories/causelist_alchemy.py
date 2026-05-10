@@ -239,11 +239,11 @@ class SQLAlchemyCauselistRepository:
                     INSERT INTO causelist_bench(
                       list_date, court_no, bench_label, side, list_type,
                       judges_json, not_sitting, vc_link, jurisdiction, scraped_at, source_id,
-                      at_time, floor, building
+                      at_time, floor, building, source_court
                     ) VALUES(
                       :list_date, :court_no, :bench_label, :side, :list_type,
                       :judges_json, :not_sitting, :vc_link, :jurisdiction, :scraped_at, :source_id,
-                      :at_time, :floor, :building
+                      :at_time, :floor, :building, :source_court
                     )
                     ON CONFLICT(list_date, court_no, side, list_type) DO UPDATE SET
                       bench_label=excluded.bench_label,
@@ -255,7 +255,8 @@ class SQLAlchemyCauselistRepository:
                       source_id=excluded.source_id,
                       at_time=excluded.at_time,
                       floor=excluded.floor,
-                      building=excluded.building
+                      building=excluded.building,
+                      source_court=excluded.source_court
                     RETURNING id
                 """), {
                     "list_date": bench["list_date"],
@@ -272,6 +273,7 @@ class SQLAlchemyCauselistRepository:
                     "at_time": bench.get("at_time"),
                     "floor": bench.get("floor"),
                     "building": bench.get("building"),
+                    "source_court": bench.get("source_court") or "CHD",
                 }).scalar()
 
                 for case in cases:
