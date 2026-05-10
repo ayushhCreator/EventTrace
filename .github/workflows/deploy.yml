@@ -19,9 +19,6 @@ jobs:
   build-backend:
     name: Build & push API + Scraper images
     runs-on: ubuntu-latest
-    outputs:
-      api-image: ${{ steps.tags.outputs.api }}
-      scraper-image: ${{ steps.tags.outputs.scraper }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,24 +31,17 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
 
-      - name: Set image tags
-        id: tags
-        run: |
-          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
-          echo "api=${{ env.AR_REPO }}/api:${SHA}" >> "${GITHUB_OUTPUT}"
-          echo "scraper=${{ env.AR_REPO }}/scraper:${SHA}" >> "${GITHUB_OUTPUT}"
-          echo "api-image=${{ env.AR_REPO }}/api:${SHA}"
-          echo "scraper-image=${{ env.AR_REPO }}/scraper:${SHA}"
-
       - name: Build & push API image
         run: |
-          docker build -f Dockerfile.api -t ${{ steps.tags.outputs.api }} .
-          docker push ${{ steps.tags.outputs.api }}
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          docker build -f Dockerfile.api -t "${{ env.AR_REPO }}/api:${SHA}" .
+          docker push "${{ env.AR_REPO }}/api:${SHA}"
 
       - name: Build & push Scraper image
         run: |
-          docker build -f Dockerfile.scraper -t ${{ steps.tags.outputs.scraper }} .
-          docker push ${{ steps.tags.outputs.scraper }}
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          docker build -f Dockerfile.scraper -t "${{ env.AR_REPO }}/scraper:${SHA}" .
+          docker push "${{ env.AR_REPO }}/scraper:${SHA}"
 
   # ── 2. Run Alembic migrations ────────────────────────────────────────────────
   migrate:
@@ -65,13 +55,13 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Debug image output
-        run: echo "api-image=${{ needs.build-backend.outputs.api-image }}"
-
       - name: Deploy migration Cloud Run Job
         run: |
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          IMAGE="${{ env.AR_REPO }}/api:${SHA}"
+          echo "Using image: ${IMAGE}"
           gcloud run jobs deploy supersahayak-migrate \
-            --image ${{ needs.build-backend.outputs.api-image }} \
+            --image "${IMAGE}" \
             --region ${{ env.REGION }} \
             --command alembic \
             --args "upgrade,head" \
@@ -101,8 +91,9 @@ jobs:
 
       - name: Deploy API service
         run: |
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
           gcloud run deploy supersahayak-api \
-            --image ${{ needs.build-backend.outputs.api-image }} \
+            --image "${{ env.AR_REPO }}/api:${SHA}" \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
@@ -122,8 +113,9 @@ jobs:
 
       - name: Deploy Monitor service
         run: |
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
           gcloud run deploy supersahayak-monitor \
-            --image ${{ needs.build-backend.outputs.scraper-image }} \
+            --image "${{ env.AR_REPO }}/scraper:${SHA}" \
             --region ${{ env.REGION }} \
             --platform managed \
             --no-allow-unauthenticated \
@@ -138,8 +130,9 @@ jobs:
 
       - name: Deploy Scheduler service
         run: |
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
           gcloud run deploy supersahayak-scheduler \
-            --image ${{ needs.build-backend.outputs.scraper-image }} \
+            --image "${{ env.AR_REPO }}/scraper:${SHA}" \
             --region ${{ env.REGION }} \
             --platform managed \
             --no-allow-unauthenticated \
