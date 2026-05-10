@@ -1,8 +1,7 @@
-name: Deploy to GCP
+name: Deploy to GCP (DISABLED - using Cloud Build trigger instead)
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:  # manual only
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

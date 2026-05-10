@@ -5,7 +5,7 @@ substitutions:
   _RUN_SA: supersahayak-run-sa@supersahayak.iam.gserviceaccount.com
   _FIREBASE_PROJECT: legalsupersahayak                         # Firebase Hosting project
   _WEB_REPO: ayushhCreator/EventTrace-Web                     # set in trigger
-  _VITE_API_URL: https://supersahayak-api-HASH-el.a.run.app   # set in trigger
+  _VITE_API_URL: https://supersahayak-api-1085288406739.asia-south1.run.app
 
 availableSecrets:
   secretManager:
