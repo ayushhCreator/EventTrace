@@ -18,31 +18,28 @@ _bearer = HTTPBearer(auto_error=False)
 _limiter = Limiter(key_func=get_remote_address)
 
 _COOKIE_NAME = "et_token"
-_COOKIE_MAX_AGE = 7 * 24 * 3600  # 7 days
+_REFRESH_COOKIE_NAME = "et_refresh"
+_ACCESS_MAX_AGE = auth_svc.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+_REFRESH_MAX_AGE = auth_svc.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+
+
+def _cookie_flags(settings) -> dict:
+    is_prod = bool(settings.database_url or settings.msg91_auth_key)
+    return {"httponly": True, "secure": is_prod, "samesite": "none" if is_prod else "lax", "path": "/"}
 
 
 def _set_auth_cookie(response: Response, token: str, settings) -> None:
-    is_prod = bool(settings.database_url or settings.msg91_auth_key)
-    response.set_cookie(
-        key=_COOKIE_NAME,
-        value=token,
-        max_age=_COOKIE_MAX_AGE,
-        httponly=True,
-        secure=is_prod,
-        samesite="none" if is_prod else "lax",
-        path="/",
-    )
+    response.set_cookie(key=_COOKIE_NAME, value=token, max_age=_ACCESS_MAX_AGE, **_cookie_flags(settings))
 
 
-def _clear_auth_cookie(response: Response, settings) -> None:
-    is_prod = bool(settings.database_url or settings.msg91_auth_key)
-    response.delete_cookie(
-        key=_COOKIE_NAME,
-        httponly=True,
-        secure=is_prod,
-        samesite="none" if is_prod else "lax",
-        path="/",
-    )
+def _set_refresh_cookie(response: Response, token: str, settings) -> None:
+    response.set_cookie(key=_REFRESH_COOKIE_NAME, value=token, max_age=_REFRESH_MAX_AGE, **_cookie_flags(settings))
+
+
+def _clear_auth_cookies(response: Response, settings) -> None:
+    flags = _cookie_flags(settings)
+    response.delete_cookie(key=_COOKIE_NAME, **flags)
+    response.delete_cookie(key=_REFRESH_COOKIE_NAME, **flags)
 
 
 def _current_user(
@@ -120,19 +117,62 @@ def verify_otp(
     db.mark_otp_used(record["id"])
     db.mark_user_verified(phone)
     user = db.get_user_by_phone(phone)
-    token = auth_svc.issue_jwt(str(user["id"]), settings)
+    user_id = str(user["id"])
 
-    _set_auth_cookie(response, token, settings)
+    access_token = auth_svc.issue_jwt(user_id, settings)
+    refresh_token = auth_svc.issue_refresh_token()
+    refresh_hash = auth_svc.hash_refresh_token(refresh_token)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)).isoformat()
+    db.save_refresh_token(user_id, refresh_hash, expires_at)
+
+    _set_auth_cookie(response, access_token, settings)
+    _set_refresh_cookie(response, refresh_token, settings)
     is_new = not user.get("name")
     return {"user": user, "is_new_user": is_new}
 
 
-@router.post("/logout")
-def logout(
+@router.post("/refresh")
+@_limiter.limit("10/minute")
+def refresh(
+    request: Request,
     response: Response,
+    db: Any = Depends(get_db),
     settings=Depends(get_settings),
 ) -> dict:
-    _clear_auth_cookie(response, settings)
+    token = request.cookies.get(_REFRESH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    token_hash = auth_svc.hash_refresh_token(token)
+    record = db.get_refresh_token(token_hash)
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
+    exp = auth_svc.parse_dt_maybe_iso(record["expires_at"])
+    if datetime.now(timezone.utc) > exp:
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    # Rotate: revoke old, issue new
+    db.revoke_refresh_token(token_hash)
+    new_refresh = auth_svc.issue_refresh_token()
+    new_refresh_hash = auth_svc.hash_refresh_token(new_refresh)
+    new_expires = (datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)).isoformat()
+    db.save_refresh_token(record["user_id"], new_refresh_hash, new_expires)
+
+    access_token = auth_svc.issue_jwt(record["user_id"], settings)
+    _set_auth_cookie(response, access_token, settings)
+    _set_refresh_cookie(response, new_refresh, settings)
+    return {"detail": "ok"}
+
+
+@router.post("/logout")
+def logout(
+    request: Request,
+    response: Response,
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict:
+    token = request.cookies.get(_REFRESH_COOKIE_NAME)
+    if token:
+        db.revoke_refresh_token(auth_svc.hash_refresh_token(token))
+    _clear_auth_cookies(response, settings)
     return {"detail": "Logged out"}
 
 

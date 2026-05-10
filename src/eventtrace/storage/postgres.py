@@ -681,6 +681,18 @@ class PostgresDB:
     def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
         return self._auth.update_user_profile(user_id, name, email)
 
+    def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
+        return self._auth.save_refresh_token(user_id, token_hash, expires_at)
+
+    def get_refresh_token(self, token_hash: str) -> dict | None:
+        return self._auth.get_refresh_token(token_hash)
+
+    def revoke_refresh_token(self, token_hash: str) -> None:
+        return self._auth.revoke_refresh_token(token_hash)
+
+    def revoke_all_user_refresh_tokens(self, user_id: str) -> None:
+        return self._auth.revoke_all_user_refresh_tokens(user_id)
+
     # ── Tracked cases ────────────────────────────────────────────────────────
 
     def add_tracked_case(self, user_id: str, case_ref: str, **kwargs: Any) -> int:

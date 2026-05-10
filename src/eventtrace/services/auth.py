@@ -18,7 +18,8 @@ from .validators import ensure_utc_aware, parse_dt_maybe_iso
 log = structlog.get_logger()
 
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_DAYS = 7
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 OTP_EXPIRE_MINUTES = 10
 OTP_MAX_ATTEMPTS = 5
 
@@ -26,10 +27,18 @@ OTP_MAX_ATTEMPTS = 5
 def issue_jwt(user_id: str, settings: Settings) -> str:
     payload = {
         "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALGORITHM)
+
+
+def issue_refresh_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def decode_jwt(token: str, settings: Settings) -> dict:

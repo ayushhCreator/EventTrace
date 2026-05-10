@@ -278,6 +278,22 @@ class CaseTimelineEvent(Base):
     )
 
 
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    expires_at = Column(String, nullable=False)
+    revoked = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_refresh_tokens_user", "user_id"),
+        Index("idx_refresh_tokens_hash", "token_hash"),
+    )
+
+
 class Matter(Base):
     __tablename__ = "matter"
 

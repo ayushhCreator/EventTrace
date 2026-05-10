@@ -15,7 +15,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from ...common.time import iso, utc_now
-from ..models import PhoneOtp, User
+from ..models import PhoneOtp, RefreshToken, User
 
 
 def _user_to_dict(user: User) -> dict:
@@ -162,3 +162,50 @@ class SQLAlchemyAuthRepository:
                 user.notification_prefs = json.dumps(prefs)
                 session.commit()
         return prefs
+
+    def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
+        with Session(self._engine) as session:
+            rt = RefreshToken(
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                revoked=0,
+                created_at=iso(utc_now()),
+            )
+            session.add(rt)
+            session.commit()
+
+    def get_refresh_token(self, token_hash: str) -> dict | None:
+        with Session(self._engine) as session:
+            rt = session.scalar(
+                select(RefreshToken).where(
+                    RefreshToken.token_hash == token_hash,
+                    RefreshToken.revoked == 0,
+                )
+            )
+            if not rt:
+                return None
+            return {
+                "id": rt.id,
+                "user_id": rt.user_id,
+                "expires_at": rt.expires_at,
+                "revoked": rt.revoked,
+            }
+
+    def revoke_refresh_token(self, token_hash: str) -> None:
+        with Session(self._engine) as session:
+            session.execute(
+                update(RefreshToken)
+                .where(RefreshToken.token_hash == token_hash)
+                .values(revoked=1)
+            )
+            session.commit()
+
+    def revoke_all_user_refresh_tokens(self, user_id: str) -> None:
+        with Session(self._engine) as session:
+            session.execute(
+                update(RefreshToken)
+                .where(RefreshToken.user_id == user_id)
+                .values(revoked=1)
+            )
+            session.commit()
