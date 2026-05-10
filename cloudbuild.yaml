@@ -1,7 +1,7 @@
 substitutions:
   _REGION: asia-south1
-  _AR_REPO: asia-south1-docker.pkg.dev/$PROJECT_ID/supersahayak
-  _SQL_CONN: $PROJECT_ID:asia-south1:supersahayak-pg
+  _AR_REPO: asia-south1-docker.pkg.dev/supersahayak/supersahayak
+  _SQL_CONN: supersahayak:asia-south1:supersahayak-pg
   _RUN_SA: supersahayak-run-sa@$PROJECT_ID.iam.gserviceaccount.com
   _FIREBASE_PROJECT: legalsupersahayak                         # Firebase Hosting project
   _WEB_REPO: ayushhCreator/EventTrace-Web                     # set in trigger
