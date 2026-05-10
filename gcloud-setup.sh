@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── EDIT THESE ────────────────────────────────────────────────────────────────
-PROJECT_ID="your-gcp-project-id"         # gcloud projects list
+PROJECT_ID="supersahayak"
 REGION="asia-south1"                      # Mumbai — closest to India
 SQL_INSTANCE="eventtrace-pg"
 SQL_DB="eventtrace"
