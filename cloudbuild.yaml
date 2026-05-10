@@ -103,7 +103,7 @@ steps:
           --min-instances 1 \
           --max-instances 1 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
 
@@ -123,7 +123,7 @@ steps:
           --min-instances 1 \
           --max-instances 1 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
 
