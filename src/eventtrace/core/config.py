@@ -76,8 +76,10 @@ class Settings:
         # Telegram chat ID for admin alerts (causelist scrape failures etc.)
         self.admin_chat_id = _get_env("ADMIN_CHAT_ID", "") or None
         # MSG91 — OTP delivery
-        self.msg91_auth_key = _get_env("MSG91_AUTH_KEY", "")
-        self.msg91_template_id = _get_env("MSG91_TEMPLATE_ID", "")
+        _msg91_key = _get_env("MSG91_AUTH_KEY", "")
+        self.msg91_auth_key = "" if _msg91_key.startswith("REPLACE_WITH") else _msg91_key
+        _msg91_tmpl = _get_env("MSG91_TEMPLATE_ID", "")
+        self.msg91_template_id = "" if _msg91_tmpl.startswith("REPLACE_WITH") else _msg91_tmpl
         # Anthropic API key — used for eCourts CAPTCHA solving via Claude Vision
         self.anthropic_api_key = _get_env("ANTHROPIC_API_KEY", "") or None
         # JWT signing secret — generate with: python -c "import secrets; print(secrets.token_hex(32))"
