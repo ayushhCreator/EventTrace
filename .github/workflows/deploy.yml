@@ -37,9 +37,11 @@ jobs:
       - name: Set image tags
         id: tags
         run: |
-          SHA=${GITHUB_SHA::8}
-          echo "api=${{ env.AR_REPO }}/api:${SHA}" >> "$GITHUB_OUTPUT"
-          echo "scraper=${{ env.AR_REPO }}/scraper:${SHA}" >> "$GITHUB_OUTPUT"
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          echo "api=${{ env.AR_REPO }}/api:${SHA}" >> "${GITHUB_OUTPUT}"
+          echo "scraper=${{ env.AR_REPO }}/scraper:${SHA}" >> "${GITHUB_OUTPUT}"
+          echo "api-image=${{ env.AR_REPO }}/api:${SHA}"
+          echo "scraper-image=${{ env.AR_REPO }}/scraper:${SHA}"
 
       - name: Build & push API image
         run: |
@@ -62,6 +64,9 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Debug image output
+        run: echo "api-image=${{ needs.build-backend.outputs.api-image }}"
 
       - name: Deploy migration Cloud Run Job
         run: |
