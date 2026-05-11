@@ -678,8 +678,8 @@ class PostgresDB:
     def mark_otp_used(self, otp_id: int) -> None:
         return self._auth.mark_otp_used(otp_id)
 
-    def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
-        return self._auth.update_user_profile(user_id, name, email)
+    def update_user_profile(self, user_id: str, name: str | None = None, email: str | None = None, role: str | None = None, bar_enrollment_number: str | None = None, firm_name: str | None = None, secondary_email: str | None = None) -> dict | None:
+        return self._auth.update_user_profile(user_id, name=name, email=email, role=role, bar_enrollment_number=bar_enrollment_number, firm_name=firm_name, secondary_email=secondary_email)
 
     def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
         return self._auth.save_refresh_token(user_id, token_hash, expires_at)

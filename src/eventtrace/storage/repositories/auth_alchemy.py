@@ -28,6 +28,10 @@ def _user_to_dict(user: User) -> dict:
         "tier": user.tier,
         "verified": user.verified,
         "notification_prefs": user.notification_prefs,
+        "bar_enrollment_number": user.bar_enrollment_number,
+        "firm_name": user.firm_name,
+        "secondary_email": user.secondary_email,
+        "is_admin": bool(user.is_admin),
     }
 
 
@@ -132,7 +136,16 @@ class SQLAlchemyAuthRepository:
                 otp.used = 1
                 session.commit()
 
-    def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
+    def update_user_profile(
+        self,
+        user_id: str,
+        name: str | None = None,
+        email: str | None = None,
+        role: str | None = None,
+        bar_enrollment_number: str | None = None,
+        firm_name: str | None = None,
+        secondary_email: str | None = None,
+    ) -> dict | None:
         with Session(self._engine) as session:
             user = session.get(User, user_id)
             if not user:
@@ -141,6 +154,14 @@ class SQLAlchemyAuthRepository:
                 user.name = name
             if email is not None:
                 user.email = email
+            if role is not None:
+                user.role = role
+            if bar_enrollment_number is not None:
+                user.bar_enrollment_number = bar_enrollment_number
+            if firm_name is not None:
+                user.firm_name = firm_name
+            if secondary_email is not None:
+                user.secondary_email = secondary_email
             session.commit()
             session.refresh(user)
             return _user_to_dict(user)

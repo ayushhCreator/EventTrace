@@ -193,6 +193,10 @@ class User(Base):
     verified = Column(Integer, nullable=False, default=0)
     created_at = Column(String, nullable=False)
     notification_prefs = Column(Text, nullable=True)
+    bar_enrollment_number = Column(String, nullable=True)
+    firm_name = Column(String, nullable=True)
+    secondary_email = Column(String, nullable=True)
+    is_admin = Column(Integer, nullable=False, default=0)
 
     otps = relationship("PhoneOtp", back_populates="user_ref", primaryjoin="User.phone == foreign(PhoneOtp.phone)", viewonly=True)
     tracked_cases = relationship("TrackedCase", back_populates="user", cascade="all, delete-orphan")

@@ -187,7 +187,15 @@ def update_me(
     current_user: dict = Depends(_current_user),
     db: Any = Depends(get_db),
 ) -> dict:
-    updated = db.update_user_profile(current_user["id"], body.name, body.email)
+    updated = db.update_user_profile(
+        current_user["id"],
+        name=body.name,
+        email=body.email,
+        role=body.role,
+        bar_enrollment_number=body.bar_enrollment_number,
+        firm_name=body.firm_name,
+        secondary_email=body.secondary_email,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
     return updated

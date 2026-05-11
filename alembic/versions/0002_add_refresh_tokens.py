@@ -16,17 +16,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "refresh_tokens",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column("user_id", sa.String(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("token_hash", sa.String(), nullable=False, unique=True),
-        sa.Column("expires_at", sa.String(), nullable=False),
-        sa.Column("revoked", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.String(), nullable=False),
-    )
-    op.create_index("idx_refresh_tokens_user", "refresh_tokens", ["user_id"])
-    op.create_index("idx_refresh_tokens_hash", "refresh_tokens", ["token_hash"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "refresh_tokens" not in inspector.get_table_names():
+        op.create_table(
+            "refresh_tokens",
+            sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+            sa.Column("user_id", sa.String(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("token_hash", sa.String(), nullable=False, unique=True),
+            sa.Column("expires_at", sa.String(), nullable=False),
+            sa.Column("revoked", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("created_at", sa.String(), nullable=False),
+        )
+        op.create_index("idx_refresh_tokens_user", "refresh_tokens", ["user_id"])
+        op.create_index("idx_refresh_tokens_hash", "refresh_tokens", ["token_hash"])
 
 
 def downgrade() -> None:
