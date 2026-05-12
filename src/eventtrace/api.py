@@ -20,6 +20,7 @@ from .routes.health import router as health_router
 from .routes.history import router as history_router
 from .routes.matters import router as matters_router
 from .routes.my_cases import router as my_cases_router, timeline_router
+from .routes.ecourts_test import router as ecourts_test_router
 from .routes.ui import router as ui_router
 from .routes.webhooks import router as webhooks_router
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_router)
     app.include_router(matters_router)
     app.include_router(ui_router)
+    app.include_router(ecourts_test_router)
 
     return app
 

@@ -27,6 +27,10 @@ Run all three together locally (3 terminals): `chd-api` + `chd-run-monitor` + `c
 API runs at `http://127.0.0.1:8009` by default. Override with `CHD_API_HOST` / `CHD_API_PORT`.
 Legacy embedded UI at `http://127.0.0.1:8009/ui` (do NOT edit unless explicitly told).
 
+## Product Name
+
+**The product/brand name is "SuperSahayak Legal"** (displayed as "SuperSahayak Legal" in all UI). The repo/directory is named EventTrace but the product shown to users is always "SuperSahayak Legal". Never rename it to "EventTrace" in UI code.
+
 ## Frontend (new UI)
 
 The real UI is a separate React/TypeScript/Tailwind app at `/home/ayush-raj/The_Base/EventTrace-Web`.
