@@ -218,6 +218,17 @@ class DB:
                   used       INTEGER NOT NULL DEFAULT 0,
                   created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS email_otps (
+                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                  email      TEXT NOT NULL,
+                  user_id    TEXT NOT NULL,
+                  otp_hash   TEXT NOT NULL,
+                  expires_at TEXT NOT NULL,
+                  attempts   INTEGER NOT NULL DEFAULT 0,
+                  used       INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -299,8 +310,9 @@ class DB:
                 "ALTER TABLE subscriptions ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0",
                 # tracked_cases: serial-alert deduplication
                 "ALTER TABLE tracked_cases ADD COLUMN alerted_at TEXT",
-                # users: notification preferences
+                # users: notification preferences + email verification
                 "ALTER TABLE users ADD COLUMN notification_prefs TEXT",
+                "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0",
                 # notification_log: enrich for tracked-case alerts
                 "ALTER TABLE notification_log ADD COLUMN tracked_case_id INTEGER",
                 "ALTER TABLE notification_log ADD COLUMN status TEXT NOT NULL DEFAULT 'sent'",
@@ -700,8 +712,26 @@ class DB:
     def mark_otp_used(self, otp_id: int) -> None:
         return self._auth.mark_otp_used(otp_id)
 
-    def update_user_profile(self, user_id: str, name: str | None, email: str | None) -> dict | None:
-        return self._auth.update_user_profile(user_id, name, email)
+    def update_user_profile(self, user_id: str, name: str | None, email: str | None, role: str | None = None, bar_enrollment_number: str | None = None, firm_name: str | None = None, secondary_email: str | None = None) -> dict | None:
+        return self._auth.update_user_profile(user_id, name=name, email=email, role=role, bar_enrollment_number=bar_enrollment_number, firm_name=firm_name, secondary_email=secondary_email)
+
+    def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at) -> None:
+        return self._auth.save_email_otp(email, user_id, otp_hash, expires_at)
+
+    def get_latest_email_otp(self, email: str) -> dict | None:
+        return self._auth.get_latest_email_otp(email)
+
+    def get_latest_email_otp_for_user(self, user_id: str) -> dict | None:
+        return self._auth.get_latest_email_otp_for_user(user_id)
+
+    def increment_email_otp_attempts(self, otp_id: int) -> None:
+        return self._auth.increment_email_otp_attempts(otp_id)
+
+    def mark_email_otp_used(self, otp_id: int) -> None:
+        return self._auth.mark_email_otp_used(otp_id)
+
+    def set_email_verified(self, user_id: str, email: str) -> dict | None:
+        return self._auth.set_email_verified(user_id, email)
 
     # ── Tracked cases ────────────────────────────────────────────────────────
 

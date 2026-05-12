@@ -256,6 +256,20 @@ class PostgresDB:
             """,
             "CREATE INDEX IF NOT EXISTS idx_phone_otps_phone ON phone_otps(phone)",
             """
+            CREATE TABLE IF NOT EXISTS email_otps (
+              id          SERIAL PRIMARY KEY,
+              email       TEXT NOT NULL,
+              user_id     TEXT NOT NULL,
+              otp_hash    TEXT NOT NULL,
+              expires_at  TIMESTAMPTZ NOT NULL,
+              attempts    INTEGER NOT NULL DEFAULT 0,
+              used        INTEGER NOT NULL DEFAULT 0,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_email_otps_email ON email_otps(email)",
+            "CREATE INDEX IF NOT EXISTS idx_email_otps_user ON email_otps(user_id)",
+            """
             CREATE TABLE IF NOT EXISTS case_snapshots (
               id         SERIAL PRIMARY KEY,
               case_ref   TEXT NOT NULL,
@@ -350,6 +364,7 @@ class PostgresDB:
             for _col in [
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alerted_at TEXT",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS tracked_case_id INTEGER",
                 "ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent'",
             ]:
@@ -680,6 +695,24 @@ class PostgresDB:
 
     def update_user_profile(self, user_id: str, name: str | None = None, email: str | None = None, role: str | None = None, bar_enrollment_number: str | None = None, firm_name: str | None = None, secondary_email: str | None = None) -> dict | None:
         return self._auth.update_user_profile(user_id, name=name, email=email, role=role, bar_enrollment_number=bar_enrollment_number, firm_name=firm_name, secondary_email=secondary_email)
+
+    def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at) -> None:
+        return self._auth.save_email_otp(email, user_id, otp_hash, expires_at)
+
+    def get_latest_email_otp(self, email: str) -> dict | None:
+        return self._auth.get_latest_email_otp(email)
+
+    def get_latest_email_otp_for_user(self, user_id: str) -> dict | None:
+        return self._auth.get_latest_email_otp_for_user(user_id)
+
+    def increment_email_otp_attempts(self, otp_id: int) -> None:
+        return self._auth.increment_email_otp_attempts(otp_id)
+
+    def mark_email_otp_used(self, otp_id: int) -> None:
+        return self._auth.mark_email_otp_used(otp_id)
+
+    def set_email_verified(self, user_id: str, email: str) -> dict | None:
+        return self._auth.set_email_verified(user_id, email)
 
     def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
         return self._auth.save_refresh_token(user_id, token_hash, expires_at)

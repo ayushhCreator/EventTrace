@@ -201,6 +201,92 @@ def update_me(
     return updated
 
 
+class SendEmailOTPRequest(BaseModel):
+    email: str
+
+
+class VerifyEmailOTPRequest(BaseModel):
+    email: str
+    otp: str
+
+
+@router.post("/email/send-otp")
+@_limiter.limit("5/minute")
+def send_email_otp(
+    request: Request,
+    body: SendEmailOTPRequest,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict:
+    import re
+    email = body.email.strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=422, detail="Invalid email address")
+
+    # Rate-limit: reuse phone OTP rate-limit logic (checks created_at < 60s ago)
+    existing = db.get_latest_email_otp(email)
+    if auth_svc.otp_rate_limited(existing):
+        raise HTTPException(status_code=429, detail="OTP already sent — wait 60 seconds")
+
+    otp = auth_svc.issue_otp()
+    otp_hash = auth_svc.hash_otp(otp, settings.otp_hmac_secret)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=auth_svc.OTP_EXPIRE_MINUTES)
+    db.save_email_otp(email, current_user["id"], otp_hash, expires_at)
+
+    from ..services.notifications import send_email_alert
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
+        <div style="width:36px;height:36px;background:#6750a4;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;flex-shrink:0">SS</div>
+        <span style="font-weight:700;color:#6750a4;font-size:16px">SuperSahayak Legal</span>
+      </div>
+      <h2 style="margin:0 0 8px;color:#1a1a2e;font-size:20px">Verify your email address</h2>
+      <p style="color:#666;margin:0 0 24px;font-size:14px">Enter this code in the app to verify <strong>{email}</strong>.</p>
+      <div style="background:#f4f0fb;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px">
+        <span style="font-size:40px;font-weight:700;letter-spacing:10px;color:#6750a4;font-family:monospace">{otp}</span>
+      </div>
+      <p style="color:#999;font-size:12px;margin:0">Expires in {auth_svc.OTP_EXPIRE_MINUTES} minutes. Don't share this code with anyone.</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+      <p style="color:#bbb;font-size:11px;margin:0">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+    """
+    ok = send_email_alert(email, "Your SuperSahayak Legal verification code", html)
+    if not ok:
+        raise HTTPException(status_code=503, detail="Failed to send email — check RESEND_API_KEY configuration")
+
+    return {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
+
+
+@router.post("/email/verify-otp")
+@_limiter.limit("10/minute")
+def verify_email_otp(
+    request: Request,
+    body: VerifyEmailOTPRequest,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict:
+    email = body.email.strip().lower()
+    record = db.get_latest_email_otp(email)
+    if not record or record["user_id"] != str(current_user["id"]):
+        raise HTTPException(status_code=400, detail="No OTP found for this email — request a new one")
+
+    exp = auth_svc.parse_dt_maybe_iso(record["expires_at"])
+    if datetime.now(timezone.utc) > exp:
+        raise HTTPException(status_code=400, detail="OTP expired — request a new one")
+    if record["attempts"] >= auth_svc.OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many attempts — request a new OTP")
+
+    db.increment_email_otp_attempts(record["id"])
+    if auth_svc.hash_otp(body.otp, settings.otp_hmac_secret) != record["otp_hash"]:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    db.mark_email_otp_used(record["id"])
+    user = db.set_email_verified(current_user["id"], email)
+    return {"user": user, "detail": "Email verified"}
+
+
 class NotificationPrefsUpdate(BaseModel):
     whatsapp: bool | None = None
     email: bool | None = None

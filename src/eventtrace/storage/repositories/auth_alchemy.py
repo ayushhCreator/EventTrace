@@ -15,7 +15,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from ...common.time import iso, utc_now
-from ..models import PhoneOtp, RefreshToken, User
+from ..models import EmailOtp, PhoneOtp, RefreshToken, User
 
 
 def _user_to_dict(user: User) -> dict:
@@ -23,6 +23,7 @@ def _user_to_dict(user: User) -> dict:
         "id": str(user.id),
         "phone": user.phone,
         "email": user.email,
+        "email_verified": bool(user.email_verified),
         "name": user.name,
         "role": user.role,
         "tier": user.tier,
@@ -32,6 +33,18 @@ def _user_to_dict(user: User) -> dict:
         "firm_name": user.firm_name,
         "secondary_email": user.secondary_email,
         "is_admin": bool(user.is_admin),
+    }
+
+
+def _email_otp_to_dict(otp: EmailOtp) -> dict:
+    return {
+        "id": otp.id,
+        "email": otp.email,
+        "user_id": otp.user_id,
+        "otp_hash": otp.otp_hash,
+        "expires_at": otp.expires_at,
+        "attempts": otp.attempts,
+        "used": otp.used,
     }
 
 
@@ -230,3 +243,67 @@ class SQLAlchemyAuthRepository:
                 .values(revoked=1)
             )
             session.commit()
+
+    # ── Email OTP ─────────────────────────────────────────────────────────────
+
+    def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at: Any) -> None:
+        now = iso(utc_now())
+        if not isinstance(expires_at, str):
+            expires_at = iso(expires_at)
+        with Session(self._engine) as session:
+            otp = EmailOtp(
+                email=email,
+                user_id=user_id,
+                otp_hash=otp_hash,
+                expires_at=expires_at,
+                attempts=0,
+                used=0,
+                created_at=now,
+            )
+            session.add(otp)
+            session.commit()
+
+    def get_latest_email_otp(self, email: str) -> dict | None:
+        with Session(self._engine) as session:
+            otp = session.scalar(
+                select(EmailOtp)
+                .where(EmailOtp.email == email, EmailOtp.used == 0)
+                .order_by(EmailOtp.id.desc())
+                .limit(1)
+            )
+            return _email_otp_to_dict(otp) if otp else None
+
+    def get_latest_email_otp_for_user(self, user_id: str) -> dict | None:
+        with Session(self._engine) as session:
+            otp = session.scalar(
+                select(EmailOtp)
+                .where(EmailOtp.user_id == user_id, EmailOtp.used == 0)
+                .order_by(EmailOtp.id.desc())
+                .limit(1)
+            )
+            return _email_otp_to_dict(otp) if otp else None
+
+    def increment_email_otp_attempts(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(EmailOtp, otp_id)
+            if otp:
+                otp.attempts += 1
+                session.commit()
+
+    def mark_email_otp_used(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(EmailOtp, otp_id)
+            if otp:
+                otp.used = 1
+                session.commit()
+
+    def set_email_verified(self, user_id: str, email: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if not user:
+                return None
+            user.email = email
+            user.email_verified = 1
+            session.commit()
+            session.refresh(user)
+            return _user_to_dict(user)

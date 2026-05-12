@@ -191,6 +191,7 @@ class User(Base):
     role = Column(String, nullable=False, default="client")
     tier = Column(String, nullable=False, default="free")
     verified = Column(Integer, nullable=False, default=0)
+    email_verified = Column(Integer, nullable=False, default=0)
     created_at = Column(String, nullable=False)
     notification_prefs = Column(Text, nullable=True)
     bar_enrollment_number = Column(String, nullable=True)
@@ -216,6 +217,19 @@ class PhoneOtp(Base):
     created_at = Column(String, nullable=False)
 
     user_ref = relationship("User", primaryjoin="foreign(PhoneOtp.phone) == User.phone", viewonly=True)
+
+
+class EmailOtp(Base):
+    __tablename__ = "email_otps"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    email = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+    otp_hash = Column(String, nullable=False)
+    expires_at = Column(String, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    used = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False)
 
 
 class TrackedCase(Base):

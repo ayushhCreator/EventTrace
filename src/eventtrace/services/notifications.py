@@ -23,7 +23,11 @@ def _resend_key() -> str:
 
 
 def _resend_from() -> str:
-    return os.getenv("RESEND_FROM_EMAIL", "alerts@eventtrace.in")
+    return os.getenv("RESEND_FROM_EMAIL", "alerts@supersahayak.in")
+
+
+def _msg91_whatsapp_number() -> str:
+    return os.getenv("MSG91_WHATSAPP_NUMBER", "")
 
 
 # ── Message formatters ────────────────────────────────────────────────────────
@@ -78,6 +82,10 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
 
 
 def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
+    wa_number = _msg91_whatsapp_number()
+    if not wa_number:
+        log.warning("MSG91_WHATSAPP_NUMBER not set — skipping MSG91 WhatsApp")
+        return False
     try:
         import httpx
 
@@ -86,7 +94,7 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
             "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
             headers={"authkey": auth_key, "Content-Type": "application/json"},
             json={
-                "integrated_number": "918000000000",
+                "integrated_number": wa_number,
                 "content_type": "template",
                 "payload": {
                     "messaging_product": "whatsapp",
@@ -200,7 +208,7 @@ def send_alert(
         log.warning("log_case_notification failed: %s", exc)
 
     email = user.get("email", "")
-    if email and prefs.get("email", True):
+    if email and user.get("email_verified") and prefs.get("email", True):
         subject = _email_subject(alert_type, context, case_ref)
         body_html = f"<p>{message}</p>"
         send_email_alert(email, subject, body_html)
@@ -208,7 +216,7 @@ def send_alert(
 
 def _email_subject(alert_type: str, context: dict, case_ref: str) -> str:
     if alert_type == "serial_reached":
-        return f"[EventTrace] Court {context.get('court_no')} — Serial Alert for {case_ref}"
+        return f"[SuperSahayak Legal] Court {context.get('court_no')} — Serial Alert for {case_ref}"
     if alert_type == "case_in_causelist":
-        return f"[EventTrace] {case_ref} listed for {context.get('date', '')}"
-    return f"[EventTrace] Update for {case_ref}"
+        return f"[SuperSahayak Legal] {case_ref} listed for {context.get('date', '')}"
+    return f"[SuperSahayak Legal] Update for {case_ref}"
