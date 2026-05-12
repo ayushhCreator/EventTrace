@@ -164,5 +164,5 @@ images:
   - "$_AR_REPO/scraper:$SHORT_SHA"
 
 options:
-  machineType: E2_HIGHCPU_8
+  machineType: E2_MEDIUM
   logging: CLOUD_LOGGING_ONLY
