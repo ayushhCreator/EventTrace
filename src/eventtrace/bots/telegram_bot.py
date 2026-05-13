@@ -449,6 +449,7 @@ async def cmd_redirect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     from ..core.logging_setup import configure_logging
+
     configure_logging()
     settings = Settings()
     if not settings.telegram_token:

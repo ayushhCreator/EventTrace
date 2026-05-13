@@ -35,6 +35,7 @@ chd-scrape-vc = "eventtrace.causelist_scraper:main"
 chd-scrape-causelist = "eventtrace.causelist_parser:main"
 chd-schedule-causelist = "eventtrace.causelist_scheduler:main"
 chd-backfill = "eventtrace.backfill:main"
+chd-refresh-case-history = "eventtrace.case_history_refresh:main"
 
 court-display-init-session = "eventtrace.init_session:main"
 court-display-run-monitor = "eventtrace.run_monitor:main"

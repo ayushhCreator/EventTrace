@@ -41,7 +41,11 @@ class SQLAlchemyEventsRepository:
                 obj.data_json = payload
                 obj.last_seen_time = iso(seen_time)
             else:
-                session.add(CurrentState(court_id=court_id, data_json=payload, last_seen_time=iso(seen_time)))
+                session.add(
+                    CurrentState(
+                        court_id=court_id, data_json=payload, last_seen_time=iso(seen_time)
+                    )
+                )
             session.commit()
 
     def get_field_state(self, court_id: str, field_name: str) -> dict | None:
@@ -72,10 +76,15 @@ class SQLAlchemyEventsRepository:
                 obj.start_time = iso(start_time)
                 obj.last_seen_time = iso(last_seen_time)
             else:
-                session.add(FieldState(
-                    court_id=court_id, field_name=field_name, value=value,
-                    start_time=iso(start_time), last_seen_time=iso(last_seen_time),
-                ))
+                session.add(
+                    FieldState(
+                        court_id=court_id,
+                        field_name=field_name,
+                        value=value,
+                        start_time=iso(start_time),
+                        last_seen_time=iso(last_seen_time),
+                    )
+                )
             session.commit()
 
     def touch_field_state(self, court_id: str, field_name: str, last_seen_time: datetime) -> None:
@@ -89,16 +98,18 @@ class SQLAlchemyEventsRepository:
 
     def insert_event_trace(self, trace: EventTraceDomain, observed_time: datetime) -> None:
         with Session(self._engine) as session:
-            session.add(EventTraceORM(
-                court_id=trace.court_id,
-                field_name=trace.field_name,
-                old_value=trace.old_value,
-                new_value=trace.new_value,
-                start_time=iso(trace.start_time),
-                end_time=iso(trace.end_time),
-                duration_seconds=trace.duration_seconds,
-                observed_time=iso(observed_time),
-            ))
+            session.add(
+                EventTraceORM(
+                    court_id=trace.court_id,
+                    field_name=trace.field_name,
+                    old_value=trace.old_value,
+                    new_value=trace.new_value,
+                    start_time=iso(trace.start_time),
+                    end_time=iso(trace.end_time),
+                    duration_seconds=trace.duration_seconds,
+                    observed_time=iso(observed_time),
+                )
+            )
             session.commit()
 
     def insert_change(self, change: EventTraceDomain, observed_time: datetime) -> None:
@@ -108,11 +119,17 @@ class SQLAlchemyEventsRepository:
         with Session(self._engine) as session:
             rows = session.scalars(select(CurrentState).order_by(CurrentState.court_id)).all()
         return [
-            {"court_id": r.court_id, "data": json.loads(r.data_json), "last_seen_time": r.last_seen_time}
+            {
+                "court_id": r.court_id,
+                "data": json.loads(r.data_json),
+                "last_seen_time": r.last_seen_time,
+            }
             for r in rows
         ]
 
-    def list_event_traces(self, limit: int = 200, court_id: str | None = None) -> list[dict[str, Any]]:
+    def list_event_traces(
+        self, limit: int = 200, court_id: str | None = None
+    ) -> list[dict[str, Any]]:
         with Session(self._engine) as session:
             q = select(EventTraceORM).order_by(EventTraceORM.observed_time.desc()).limit(limit)
             if court_id:
@@ -120,10 +137,15 @@ class SQLAlchemyEventsRepository:
             rows = session.scalars(q).all()
         return [
             {
-                "id": r.id, "court_id": r.court_id, "field_name": r.field_name,
-                "old_value": r.old_value, "new_value": r.new_value,
-                "start_time": r.start_time, "end_time": r.end_time,
-                "duration_seconds": r.duration_seconds, "observed_time": r.observed_time,
+                "id": r.id,
+                "court_id": r.court_id,
+                "field_name": r.field_name,
+                "old_value": r.old_value,
+                "new_value": r.new_value,
+                "start_time": r.start_time,
+                "end_time": r.end_time,
+                "duration_seconds": r.duration_seconds,
+                "observed_time": r.observed_time,
             }
             for r in rows
         ]
@@ -140,26 +162,37 @@ class SQLAlchemyEventsRepository:
             ).all()
         return [
             {
-                "court_id": r.court_id, "field_name": r.field_name, "value": r.value,
-                "start_time": r.start_time, "last_seen_time": r.last_seen_time,
+                "court_id": r.court_id,
+                "field_name": r.field_name,
+                "value": r.value,
+                "start_time": r.start_time,
+                "last_seen_time": r.last_seen_time,
             }
             for r in rows
         ]
 
     def list_field_names(self, court_id: str) -> set[str]:
         with Session(self._engine) as session:
-            rows = session.execute(
-                select(FieldState.field_name).where(FieldState.court_id == court_id)
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(FieldState.field_name).where(FieldState.court_id == court_id)
+                )
+                .scalars()
+                .all()
+            )
         return set(rows)
 
     def list_absent_court_ids(self) -> list[str]:
         with Session(self._engine) as session:
-            rows = session.execute(
-                select(FieldState.court_id).where(
-                    FieldState.field_name == "__present__", FieldState.value == "0"
+            rows = (
+                session.execute(
+                    select(FieldState.court_id).where(
+                        FieldState.field_name == "__present__", FieldState.value == "0"
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         return list(rows)
 
     def list_serial_start_times(self) -> dict[str, str]:
@@ -179,22 +212,28 @@ class SQLAlchemyEventsRepository:
     def list_active_dates(self) -> list[str]:
         with Session(self._engine) as session:
             if _is_pg(self._engine):
-                rows = session.execute(text(
-                    "SELECT DISTINCT (observed_time::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS d "
-                    "FROM event_trace ORDER BY d DESC"
-                )).all()
+                rows = session.execute(
+                    text(
+                        "SELECT DISTINCT (observed_time::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS d "
+                        "FROM event_trace ORDER BY d DESC"
+                    )
+                ).all()
                 return [str(r.d) for r in rows]
             else:
-                rows = session.execute(text(
-                    "SELECT DISTINCT DATE(observed_time, '+5 hours', '30 minutes') AS d "
-                    "FROM event_trace ORDER BY d DESC"
-                )).all()
+                rows = session.execute(
+                    text(
+                        "SELECT DISTINCT DATE(observed_time, '+5 hours', '30 minutes') AS d "
+                        "FROM event_trace ORDER BY d DESC"
+                    )
+                ).all()
                 return [r.d for r in rows]
 
     def list_day_activity(self, date_str: str) -> list[dict[str, Any]]:
         with Session(self._engine) as session:
             if _is_pg(self._engine):
-                rows = session.execute(text("""
+                rows = (
+                    session.execute(
+                        text("""
                     SELECT
                       court_id,
                       SUM(CASE WHEN field_name != '__present__' THEN 1 ELSE 0 END) AS change_count,
@@ -210,9 +249,16 @@ class SQLAlchemyEventsRepository:
                     WHERE (observed_time::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = :d::date
                     GROUP BY court_id
                     ORDER BY court_id
-                """), {"d": date_str}).mappings().all()
+                """),
+                        {"d": date_str},
+                    )
+                    .mappings()
+                    .all()
+                )
             else:
-                rows = session.execute(text("""
+                rows = (
+                    session.execute(
+                        text("""
                     SELECT
                       court_id,
                       SUM(CASE WHEN field_name != '__present__' THEN 1 ELSE 0 END) AS change_count,
@@ -227,7 +273,12 @@ class SQLAlchemyEventsRepository:
                     WHERE DATE(observed_time, '+5 hours', '30 minutes') = :d
                     GROUP BY court_id
                     ORDER BY court_id
-                """), {"d": date_str}).mappings().all()
+                """),
+                        {"d": date_str},
+                    )
+                    .mappings()
+                    .all()
+                )
         return [dict(r) for r in rows]
 
     def set_monitor_state(self, key: str, value: str) -> None:
@@ -244,14 +295,20 @@ class SQLAlchemyEventsRepository:
             obj = session.get(MonitorState, key)
         return obj.value if obj else None
 
-    def upsert_vc_zoom_link(self, date: str, room_no: str, zoom_url: str, scraped_at: datetime) -> None:
+    def upsert_vc_zoom_link(
+        self, date: str, room_no: str, zoom_url: str, scraped_at: datetime
+    ) -> None:
         with Session(self._engine) as session:
             obj = session.get(VcZoomLink, (date, room_no))
             if obj:
                 obj.zoom_url = zoom_url
                 obj.scraped_at = iso(scraped_at)
             else:
-                session.add(VcZoomLink(date=date, room_no=room_no, zoom_url=zoom_url, scraped_at=iso(scraped_at)))
+                session.add(
+                    VcZoomLink(
+                        date=date, room_no=room_no, zoom_url=zoom_url, scraped_at=iso(scraped_at)
+                    )
+                )
             session.commit()
 
     def get_vc_zoom_links(self, date: str) -> dict[str, str]:
@@ -261,7 +318,9 @@ class SQLAlchemyEventsRepository:
 
     def list_vc_dates(self) -> list[str]:
         with Session(self._engine) as session:
-            rows = session.execute(
-                select(VcZoomLink.date).distinct().order_by(VcZoomLink.date.desc())
-            ).scalars().all()
+            rows = (
+                session.execute(select(VcZoomLink.date).distinct().order_by(VcZoomLink.date.desc()))
+                .scalars()
+                .all()
+            )
         return list(rows)

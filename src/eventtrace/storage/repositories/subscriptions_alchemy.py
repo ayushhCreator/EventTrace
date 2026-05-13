@@ -88,7 +88,9 @@ class SQLAlchemySubscriptionsRepository:
     def update_last_notified_serial(self, sub_id: int, serial: int) -> None:
         with Session(self._engine) as session:
             session.execute(
-                update(Subscription).where(Subscription.id == sub_id).values(last_notified_serial=serial)
+                update(Subscription)
+                .where(Subscription.id == sub_id)
+                .values(last_notified_serial=serial)
             )
             session.commit()
 
@@ -122,7 +124,9 @@ class SQLAlchemySubscriptionsRepository:
     def mark_alerted(self, sub_id: int) -> None:
         with Session(self._engine) as session:
             session.execute(
-                update(Subscription).where(Subscription.id == sub_id).values(alerted_at=iso(utc_now()))
+                update(Subscription)
+                .where(Subscription.id == sub_id)
+                .values(alerted_at=iso(utc_now()))
             )
             session.commit()
 

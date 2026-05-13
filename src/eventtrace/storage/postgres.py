@@ -4,7 +4,8 @@ import structlog
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 from typing import Any, Generator
 
 from sqlalchemy import create_engine
@@ -40,7 +41,9 @@ class PostgresDB:
         self._pool = None
         self._pool_lock = threading.Lock()
         # SQLAlchemy 2.0 requires "postgresql://" not "postgres://" (Railway uses the latter)
-        _sa_url = dsn.replace("postgres://", "postgresql://", 1) if dsn.startswith("postgres://") else dsn
+        _sa_url = (
+            dsn.replace("postgres://", "postgresql://", 1) if dsn.startswith("postgres://") else dsn
+        )
         self._engine = create_engine(_sa_url, pool_size=5, max_overflow=10)
         self._events = SQLAlchemyEventsRepository(self._engine)
         self._subscriptions = SQLAlchemySubscriptionsRepository(self._engine)
@@ -220,6 +223,12 @@ class PostgresDB:
               serial_no    INTEGER,
               petitioner   TEXT,
               respondent   TEXT,
+                            cino         TEXT,
+                            case_type_id TEXT,
+                            state_cd     TEXT,
+                            court_code   TEXT,
+                            case_no      TEXT,
+                            case_year    TEXT,
               alert_active INTEGER NOT NULL DEFAULT 0,
               alert_serial INTEGER,
               look_ahead   INTEGER NOT NULL DEFAULT 5,
@@ -229,6 +238,20 @@ class PostgresDB:
             """,
             "CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref)",
+            """
+            CREATE TABLE IF NOT EXISTS case_history_cache (
+                cino         TEXT NOT NULL,
+                state_cd     TEXT NOT NULL,
+                court_code   TEXT NOT NULL,
+                case_type_id TEXT,
+                case_no      TEXT,
+                case_year    TEXT,
+                data_json    TEXT NOT NULL,
+                fetched_at   TEXT NOT NULL,
+                PRIMARY KEY (cino, state_cd, court_code)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_case_history_cache_fetched ON case_history_cache(fetched_at DESC)",
             # ── Phone-OTP auth ────────────────────────────────────────────────
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -350,6 +373,12 @@ class PostgresDB:
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS serial_no INTEGER",
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS petitioner TEXT",
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS respondent TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS cino TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_type_id TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS state_cd TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS court_code TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_no TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_year TEXT",
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_active INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_serial INTEGER",
                 "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS look_ahead INTEGER NOT NULL DEFAULT 5",
@@ -370,6 +399,16 @@ class PostgresDB:
             ]:
                 try:
                     cur.execute(_col)
+                except Exception:
+                    pass
+
+            # Indexes on tracked_cases columns that were added via ALTER TABLE
+            for idx_sql in [
+                "CREATE INDEX IF NOT EXISTS idx_tracked_cases_cino ON tracked_cases(cino)",
+                "CREATE INDEX IF NOT EXISTS idx_tracked_cases_refresh ON tracked_cases(state_cd, court_code, case_type_id)",
+            ]:
+                try:
+                    cur.execute(idx_sql)
                 except Exception:
                     pass
 
@@ -606,19 +645,35 @@ class PostgresDB:
     # ── Causelist delegation ─────────────────────────────────────────────────
 
     def get_causelist_bench(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> dict[str, Any] | None:
         return self._causelist.get_causelist_bench(
             list_date, court_no, side=side, list_type=list_type, source_id=source_id
         )
 
     def list_causelist_benches(
-        self, list_date: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type, source_id=source_id)
+        return self._causelist.list_causelist_benches(
+            list_date, side=side, list_type=list_type, source_id=source_id
+        )
 
     def list_causelist_cases(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self._causelist.list_causelist_cases(
             list_date, court_no, side=side, list_type=list_type, source_id=source_id
@@ -693,8 +748,25 @@ class PostgresDB:
     def mark_otp_used(self, otp_id: int) -> None:
         return self._auth.mark_otp_used(otp_id)
 
-    def update_user_profile(self, user_id: str, name: str | None = None, email: str | None = None, role: str | None = None, bar_enrollment_number: str | None = None, firm_name: str | None = None, secondary_email: str | None = None) -> dict | None:
-        return self._auth.update_user_profile(user_id, name=name, email=email, role=role, bar_enrollment_number=bar_enrollment_number, firm_name=firm_name, secondary_email=secondary_email)
+    def update_user_profile(
+        self,
+        user_id: str,
+        name: str | None = None,
+        email: str | None = None,
+        role: str | None = None,
+        bar_enrollment_number: str | None = None,
+        firm_name: str | None = None,
+        secondary_email: str | None = None,
+    ) -> dict | None:
+        return self._auth.update_user_profile(
+            user_id,
+            name=name,
+            email=email,
+            role=role,
+            bar_enrollment_number=bar_enrollment_number,
+            firm_name=firm_name,
+            secondary_email=secondary_email,
+        )
 
     def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at) -> None:
         return self._auth.save_email_otp(email, user_id, otp_hash, expires_at)
@@ -734,10 +806,11 @@ class PostgresDB:
             cur.execute(
                 """
                 INSERT INTO tracked_cases
-                  (user_id, case_ref, court_no, bench_label, judges_json,
-                   list_date, serial_no, petitioner, respondent, added_at,
-                   created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                                    (user_id, case_ref, court_no, bench_label, judges_json,
+                                     list_date, serial_no, petitioner, respondent,
+                                     cino, case_type_id, state_cd, court_code, case_no, case_year,
+                                     added_at, alert_active, look_ahead)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 5)
                 ON CONFLICT (user_id, case_ref) DO UPDATE SET
                   court_no    = EXCLUDED.court_no,
                   bench_label = EXCLUDED.bench_label,
@@ -745,7 +818,13 @@ class PostgresDB:
                   list_date   = EXCLUDED.list_date,
                   serial_no   = EXCLUDED.serial_no,
                   petitioner  = EXCLUDED.petitioner,
-                  respondent  = EXCLUDED.respondent
+                                    respondent  = EXCLUDED.respondent,
+                                    cino        = EXCLUDED.cino,
+                                    case_type_id = EXCLUDED.case_type_id,
+                                    state_cd    = EXCLUDED.state_cd,
+                                    court_code  = EXCLUDED.court_code,
+                                    case_no     = EXCLUDED.case_no,
+                                    case_year   = EXCLUDED.case_year
                 RETURNING id
                 """,
                 (
@@ -758,6 +837,12 @@ class PostgresDB:
                     kwargs.get("serial_no"),
                     kwargs.get("petitioner"),
                     kwargs.get("respondent"),
+                                        kwargs.get("cino"),
+                                        kwargs.get("case_type_id"),
+                                        kwargs.get("state_cd"),
+                                        kwargs.get("court_code"),
+                                        kwargs.get("case_no"),
+                                        kwargs.get("case_year"),
                     now,
                 ),
             )
@@ -789,6 +874,87 @@ class PostgresDB:
                 (user_id,),
             )
             return [dict(r) for r in cur.fetchall()]
+
+    def list_tracked_cases_for_refresh(self, limit: int | None = None) -> list[dict]:
+        sql = (
+            "SELECT * FROM tracked_cases "
+            "WHERE cino IS NOT NULL AND cino <> '' "
+            "AND case_type_id IS NOT NULL AND case_type_id <> '' "
+            "AND state_cd IS NOT NULL AND state_cd <> '' "
+            "AND court_code IS NOT NULL AND court_code <> '' "
+            "AND case_no IS NOT NULL AND case_no <> '' "
+            "AND case_year IS NOT NULL AND case_year <> '' "
+            "ORDER BY added_at DESC"
+        )
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (limit,)
+        with self._cursor() as cur:
+            cur.execute(sql, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_case_history_cache(
+        self,
+        cino: str,
+        state_cd: str,
+        court_code: str,
+        max_age_seconds: int | None = None,
+    ) -> dict | None:
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT data_json, fetched_at
+                FROM case_history_cache
+                WHERE cino=%s AND state_cd=%s AND court_code=%s
+                """,
+                (cino, state_cd, court_code),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            fetched_at = row["fetched_at"]
+            if max_age_seconds is not None:
+                try:
+                    ts = datetime.fromisoformat(str(fetched_at))
+                    if datetime.utcnow() - ts > timedelta(seconds=max_age_seconds):
+                        return None
+                except Exception:
+                    return None
+            try:
+                data = json.loads(row["data_json"])
+            except Exception:
+                return None
+            data["cached"] = True
+            data["cached_at"] = str(fetched_at)
+            return data
+
+    def set_case_history_cache(
+        self,
+        cino: str,
+        state_cd: str,
+        court_code: str,
+        case_type_id: str | None,
+        case_no: str | None,
+        case_year: str | None,
+        data: dict,
+    ) -> None:
+        payload = json.dumps(data, ensure_ascii=False)
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO case_history_cache
+                  (cino, state_cd, court_code, case_type_id, case_no, case_year, data_json, fetched_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW()::TEXT)
+                ON CONFLICT (cino, state_cd, court_code) DO UPDATE SET
+                  case_type_id=EXCLUDED.case_type_id,
+                  case_no=EXCLUDED.case_no,
+                  case_year=EXCLUDED.case_year,
+                  data_json=EXCLUDED.data_json,
+                  fetched_at=EXCLUDED.fetched_at
+                """,
+                (cino, state_cd, court_code, case_type_id, case_no, case_year, payload),
+            )
 
     def get_tracked_case(self, user_id: str, case_ref: str) -> dict | None:
         with self._cursor() as cur:
@@ -987,18 +1153,35 @@ class PostgresDB:
                 RETURNING *
                 """,
                 (
-                    user_id, case_ref, case_title, case_type, case_number, case_year,
-                    court_no, petitioner, respondent, billing_mode, fee_per_appearance,
-                    notes, opened_at,
+                    user_id,
+                    case_ref,
+                    case_title,
+                    case_type,
+                    case_number,
+                    case_year,
+                    court_no,
+                    petitioner,
+                    respondent,
+                    billing_mode,
+                    fee_per_appearance,
+                    notes,
+                    opened_at,
                 ),
             )
             return dict(cur.fetchone())
 
     def update_matter(self, user_id: str, matter_id: int, **fields) -> dict | None:
         allowed = {
-            "case_title", "court_no", "petitioner", "respondent",
-            "billing_mode", "fee_per_appearance", "notes",
-            "status", "opened_at", "closed_at",
+            "case_title",
+            "court_no",
+            "petitioner",
+            "respondent",
+            "billing_mode",
+            "fee_per_appearance",
+            "notes",
+            "status",
+            "opened_at",
+            "closed_at",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:

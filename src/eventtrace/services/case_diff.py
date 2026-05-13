@@ -199,6 +199,10 @@ def run_causelist_alert_scan(db: Any, date: str) -> None:
                             "date": date,
                             "court_no": court_no,
                             "serial_no": serial_no,
+                            "section": row.get("section", ""),
+                            "subsection": row.get("subsection", ""),
+                            "bench_label": row.get("bench_label", ""),
+                            "vc_link": row.get("vc_link", ""),
                         },
                     )
                     db.insert_timeline_event(user_id, case_ref, "case_in_causelist", date)

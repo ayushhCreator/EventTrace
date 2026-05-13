@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import structlog
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,8 @@ from pydantic import BaseModel, Field
 from ..common.time import ist_today_str
 from ..routes.auth import _current_user
 from ..services.deps import get_db
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/my-cases")
 
@@ -22,6 +25,12 @@ class TrackRequest(BaseModel):
     serial_no: int | None = None
     petitioner: str | None = None
     respondent: str | None = None
+    cino: str | None = None
+    case_type_id: str | None = None
+    state_cd: str | None = None
+    court_code: str | None = None
+    case_no: str | None = None
+    case_year: str | None = None
 
 
 class AlertRequest(BaseModel):
@@ -53,12 +62,44 @@ def track_case(
         serial_no=req.serial_no,
         petitioner=req.petitioner,
         respondent=req.respondent,
+        cino=req.cino,
+        case_type_id=req.case_type_id,
+        state_cd=req.state_cd,
+        court_code=req.court_code,
+        case_no=req.case_no,
+        case_year=req.case_year,
     )
     today = ist_today_str()
     try:
         db.insert_timeline_event(current_user["id"], req.case_ref, "TRACK_STARTED", today)
     except Exception:
         pass
+
+    # Bulk-import past causelist appearances as timeline events
+    try:
+        past = db.search_causelist_cases(case_ref=req.case_ref, limit=50)
+        for row in past:
+            try:
+                db.insert_timeline_event(
+                    current_user["id"],
+                    req.case_ref,
+                    "CAUSELIST_APPEARANCE",
+                    row["list_date"],
+                    json.dumps(
+                        {
+                            "court_no": row.get("court_no"),
+                            "section": row.get("section"),
+                            "subsection": row.get("subsection"),
+                            "serial_no": row.get("serial_no"),
+                            "bench_label": row.get("bench_label"),
+                        }
+                    ),
+                )
+            except Exception:
+                pass  # skip duplicates silently
+    except Exception as exc:
+        log.warning("bulk appearance import failed: %s", exc)
+
     return db.get_tracked_case(current_user["id"], req.case_ref) or {"id": case_id}
 
 

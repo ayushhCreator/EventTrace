@@ -91,6 +91,7 @@ def main() -> None:
     import sys
 
     from ..core.logging_setup import configure_logging
+
     configure_logging()
     from ..config import Settings
 

@@ -136,6 +136,10 @@ class CauselistBench(Base):
     floor = Column(String, nullable=True)
     building = Column(String, nullable=True)
     source_court = Column(String, nullable=False, default="CHD")
+    scheduling_notes_json = Column(Text, nullable=True)
+    hearing_start_time = Column(String, nullable=True)
+    mentioning_allowed = Column(Integer, nullable=False, default=0)
+    jurisdiction_groups_json = Column(Text, nullable=True)
 
     cases = relationship("CauselistCase", back_populates="bench", cascade="all, delete-orphan")
 
@@ -151,7 +155,9 @@ class CauselistCase(Base):
     __tablename__ = "causelist_case"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    bench_id = Column(BigInteger, ForeignKey("causelist_bench.id", ondelete="CASCADE"), nullable=False)
+    bench_id = Column(
+        BigInteger, ForeignKey("causelist_bench.id", ondelete="CASCADE"), nullable=False
+    )
     list_date = Column(String, nullable=False)
     court_no = Column(String, nullable=False)
     serial_no = Column(Integer, nullable=False)
@@ -169,6 +175,15 @@ class CauselistCase(Base):
     hearing_type = Column(String, nullable=True)
     raw_text = Column(Text, nullable=True)
     scraped_at = Column(String, nullable=False)
+    canonical_section = Column(String, nullable=True)
+    group_no = Column(String, nullable=True)
+    case_time_annotation = Column(String, nullable=True)
+    is_part_heard = Column(Integer, nullable=False, default=0)
+    next_date_annotation = Column(String, nullable=True)
+    is_with_case = Column(Integer, nullable=False, default=0)
+    parent_serial_no = Column(Integer, nullable=True)
+    linked_case_ref = Column(Text, nullable=True)
+    bench_id_footer = Column(String, nullable=True)
 
     bench = relationship("CauselistBench", back_populates="cases")
 
@@ -199,9 +214,16 @@ class User(Base):
     secondary_email = Column(String, nullable=True)
     is_admin = Column(Integer, nullable=False, default=0)
 
-    otps = relationship("PhoneOtp", back_populates="user_ref", primaryjoin="User.phone == foreign(PhoneOtp.phone)", viewonly=True)
+    otps = relationship(
+        "PhoneOtp",
+        back_populates="user_ref",
+        primaryjoin="User.phone == foreign(PhoneOtp.phone)",
+        viewonly=True,
+    )
     tracked_cases = relationship("TrackedCase", back_populates="user", cascade="all, delete-orphan")
-    timeline_events = relationship("CaseTimelineEvent", back_populates="user", cascade="all, delete-orphan")
+    timeline_events = relationship(
+        "CaseTimelineEvent", back_populates="user", cascade="all, delete-orphan"
+    )
     matters = relationship("Matter", back_populates="user", cascade="all, delete-orphan")
 
 
@@ -216,7 +238,9 @@ class PhoneOtp(Base):
     used = Column(Integer, nullable=False, default=0)
     created_at = Column(String, nullable=False)
 
-    user_ref = relationship("User", primaryjoin="foreign(PhoneOtp.phone) == User.phone", viewonly=True)
+    user_ref = relationship(
+        "User", primaryjoin="foreign(PhoneOtp.phone) == User.phone", viewonly=True
+    )
 
 
 class EmailOtp(Base):

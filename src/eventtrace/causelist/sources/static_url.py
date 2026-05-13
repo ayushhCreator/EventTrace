@@ -119,8 +119,12 @@ class StaticUrlSource(CauseListSource):
                 )
             courts = parse_causelist(html, actual_date)
             for court in courts:
-                court["bench"].setdefault("side", self.side)
-                court["bench"].setdefault("list_type", self.list_type)
+                # URL path (/AS/ vs /OS/) is the authoritative source of truth.
+                # The HTML body rarely contains "APPELLATE SIDE" / "ORIGINAL SIDE"
+                # text, so the parser returns None for those fields. Force-set
+                # them here regardless of what the HTML parser found.
+                court["bench"]["side"] = self.side
+                court["bench"]["list_type"] = self.list_type
                 court["bench"]["source_id"] = self.source_id
             return SourceResult(
                 source_id=self.source_id,

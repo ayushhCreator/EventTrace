@@ -103,6 +103,7 @@ def backfill_causelist(days: int = 7) -> None:
 
 def main() -> None:
     from ..core.logging_setup import configure_logging
+
     configure_logging()
     args = sys.argv[1:]
     days = 7

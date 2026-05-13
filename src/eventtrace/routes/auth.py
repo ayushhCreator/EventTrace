@@ -25,15 +25,24 @@ _REFRESH_MAX_AGE = auth_svc.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 
 def _cookie_flags(settings) -> dict:
     is_prod = bool(settings.database_url or settings.msg91_auth_key)
-    return {"httponly": True, "secure": is_prod, "samesite": "none" if is_prod else "lax", "path": "/"}
+    return {
+        "httponly": True,
+        "secure": is_prod,
+        "samesite": "none" if is_prod else "lax",
+        "path": "/",
+    }
 
 
 def _set_auth_cookie(response: Response, token: str, settings) -> None:
-    response.set_cookie(key=_COOKIE_NAME, value=token, max_age=_ACCESS_MAX_AGE, **_cookie_flags(settings))
+    response.set_cookie(
+        key=_COOKIE_NAME, value=token, max_age=_ACCESS_MAX_AGE, **_cookie_flags(settings)
+    )
 
 
 def _set_refresh_cookie(response: Response, token: str, settings) -> None:
-    response.set_cookie(key=_REFRESH_COOKIE_NAME, value=token, max_age=_REFRESH_MAX_AGE, **_cookie_flags(settings))
+    response.set_cookie(
+        key=_REFRESH_COOKIE_NAME, value=token, max_age=_REFRESH_MAX_AGE, **_cookie_flags(settings)
+    )
 
 
 def _clear_auth_cookies(response: Response, settings) -> None:
@@ -122,7 +131,9 @@ def verify_otp(
     access_token = auth_svc.issue_jwt(user_id, settings)
     refresh_token = auth_svc.issue_refresh_token()
     refresh_hash = auth_svc.hash_refresh_token(refresh_token)
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)).isoformat()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)
+    ).isoformat()
     db.save_refresh_token(user_id, refresh_hash, expires_at)
 
     _set_auth_cookie(response, access_token, settings)
@@ -153,7 +164,9 @@ def refresh(
     db.revoke_refresh_token(token_hash)
     new_refresh = auth_svc.issue_refresh_token()
     new_refresh_hash = auth_svc.hash_refresh_token(new_refresh)
-    new_expires = (datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)).isoformat()
+    new_expires = (
+        datetime.now(timezone.utc) + timedelta(days=auth_svc.REFRESH_TOKEN_EXPIRE_DAYS)
+    ).isoformat()
     db.save_refresh_token(record["user_id"], new_refresh_hash, new_expires)
 
     access_token = auth_svc.issue_jwt(record["user_id"], settings)
@@ -220,6 +233,7 @@ def send_email_otp(
     settings=Depends(get_settings),
 ) -> dict:
     import re
+
     email = body.email.strip().lower()
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise HTTPException(status_code=422, detail="Invalid email address")
@@ -235,6 +249,7 @@ def send_email_otp(
     db.save_email_otp(email, current_user["id"], otp_hash, expires_at)
 
     from ..services.notifications import send_email_alert
+
     html = f"""
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
@@ -253,7 +268,9 @@ def send_email_otp(
     """
     ok = send_email_alert(email, "Your SuperSahayak Legal verification code", html)
     if not ok:
-        raise HTTPException(status_code=503, detail="Failed to send email — check RESEND_API_KEY configuration")
+        raise HTTPException(
+            status_code=503, detail="Failed to send email — check RESEND_API_KEY configuration"
+        )
 
     return {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
 
@@ -270,7 +287,9 @@ def verify_email_otp(
     email = body.email.strip().lower()
     record = db.get_latest_email_otp(email)
     if not record or record["user_id"] != str(current_user["id"]):
-        raise HTTPException(status_code=400, detail="No OTP found for this email — request a new one")
+        raise HTTPException(
+            status_code=400, detail="No OTP found for this email — request a new one"
+        )
 
     exp = auth_svc.parse_dt_maybe_iso(record["expires_at"])
     if datetime.now(timezone.utc) > exp:

@@ -6,9 +6,12 @@ Endpoints:
   POST /ecourts-test/api/search/case-no       → search by case number (CAPTCHA auto-solved)
   POST /ecourts-test/api/search/cnr           → search by CNR number
 """
+
 from __future__ import annotations
 
 import base64
+import html as _html
+import os
 import random
 import re
 import time
@@ -19,6 +22,8 @@ import structlog
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+
+from ..services.deps import get_db
 
 log = structlog.get_logger()
 
@@ -34,43 +39,59 @@ MAX_TRIES = 3
 
 # All 25 HCs with their known bench codes
 HC_BENCHES: dict[str, list[dict]] = {
-    "1":  [{"code": "1", "name": "Principal Bench — Mumbai"},
-           {"code": "2", "name": "Bench at Nagpur"},
-           {"code": "3", "name": "Bench at Aurangabad"},
-           {"code": "4", "name": "Bench at Goa"}],
-    "2":  [{"code": "1", "name": "Principal Bench — Amaravathi"}],
-    "3":  [{"code": "1", "name": "Principal Bench — Bengaluru"}],
-    "4":  [{"code": "1", "name": "Principal Bench — Ernakulam"}],
-    "5":  [{"code": "1", "name": "Principal Bench — Shimla"}],
-    "6":  [{"code": "1", "name": "Principal Bench — Guwahati"},
-           {"code": "2", "name": "Bench at Kohima"},
-           {"code": "3", "name": "Bench at Aizawl"},
-           {"code": "4", "name": "Bench at Agartala"},
-           {"code": "5", "name": "Bench at Imphal"}],
-    "7":  [{"code": "1", "name": "Principal Bench — Ranchi"}],
-    "8":  [{"code": "1", "name": "Principal Bench — Patna"}],
-    "9":  [{"code": "1", "name": "Principal Bench — Jodhpur"},
-           {"code": "2", "name": "Bench at Jaipur"}],
-    "10": [{"code": "1", "name": "Principal Bench — Chennai"},
-           {"code": "2", "name": "Bench at Madurai"}],
+    "1": [
+        {"code": "1", "name": "Principal Bench — Mumbai"},
+        {"code": "2", "name": "Bench at Nagpur"},
+        {"code": "3", "name": "Bench at Aurangabad"},
+        {"code": "4", "name": "Bench at Goa"},
+    ],
+    "2": [{"code": "1", "name": "Principal Bench — Amaravathi"}],
+    "3": [{"code": "1", "name": "Principal Bench — Bengaluru"}],
+    "4": [{"code": "1", "name": "Principal Bench — Ernakulam"}],
+    "5": [{"code": "1", "name": "Principal Bench — Shimla"}],
+    "6": [
+        {"code": "1", "name": "Principal Bench — Guwahati"},
+        {"code": "2", "name": "Bench at Kohima"},
+        {"code": "3", "name": "Bench at Aizawl"},
+        {"code": "4", "name": "Bench at Agartala"},
+        {"code": "5", "name": "Bench at Imphal"},
+    ],
+    "7": [{"code": "1", "name": "Principal Bench — Ranchi"}],
+    "8": [{"code": "1", "name": "Principal Bench — Patna"}],
+    "9": [
+        {"code": "1", "name": "Principal Bench — Jodhpur"},
+        {"code": "2", "name": "Bench at Jaipur"},
+    ],
+    "10": [
+        {"code": "1", "name": "Principal Bench — Chennai"},
+        {"code": "2", "name": "Bench at Madurai"},
+    ],
     "11": [{"code": "1", "name": "Principal Bench — Cuttack"}],
-    "12": [{"code": "1", "name": "Principal Bench — Srinagar"},
-           {"code": "2", "name": "Bench at Jammu"}],
-    "13": [{"code": "1", "name": "Principal Bench — Allahabad"},
-           {"code": "2", "name": "Bench at Lucknow"}],
+    "12": [
+        {"code": "1", "name": "Principal Bench — Srinagar"},
+        {"code": "2", "name": "Bench at Jammu"},
+    ],
+    "13": [
+        {"code": "1", "name": "Principal Bench — Allahabad"},
+        {"code": "2", "name": "Bench at Lucknow"},
+    ],
     "15": [{"code": "1", "name": "Principal Bench — Nainital"}],
-    "16": [{"code": "3", "name": "Appellate Side"},
-           {"code": "1", "name": "Original Side"},
-           {"code": "2", "name": "Circuit Bench — Jalpaiguri"},
-           {"code": "4", "name": "Circuit Bench — Port Blair"}],
+    "16": [
+        {"code": "3", "name": "Appellate Side"},
+        {"code": "1", "name": "Original Side"},
+        {"code": "2", "name": "Circuit Bench — Jalpaiguri"},
+        {"code": "4", "name": "Circuit Bench — Port Blair"},
+    ],
     "17": [{"code": "1", "name": "Principal Bench — Ahmedabad"}],
     "18": [{"code": "1", "name": "Principal Bench — Bilaspur"}],
     "20": [{"code": "1", "name": "Principal Bench — Agartala"}],
     "21": [{"code": "1", "name": "Principal Bench — Shillong"}],
     "22": [{"code": "1", "name": "Principal Bench — Chandigarh"}],
-    "23": [{"code": "1", "name": "Principal Bench — Jabalpur"},
-           {"code": "2", "name": "Bench at Gwalior"},
-           {"code": "3", "name": "Bench at Indore"}],
+    "23": [
+        {"code": "1", "name": "Principal Bench — Jabalpur"},
+        {"code": "2", "name": "Bench at Gwalior"},
+        {"code": "3", "name": "Bench at Indore"},
+    ],
     "24": [{"code": "1", "name": "Principal Bench — Gangtok"}],
     "25": [{"code": "1", "name": "Principal Bench — Imphal"}],
     "26": [{"code": "1", "name": "Principal Bench — New Delhi"}],
@@ -113,21 +134,30 @@ def _page_url(state_cd: str, court_code: str) -> str:
 
 def _solve_captcha(image_bytes: bytes, api_key: str) -> str:
     import anthropic
+
     b64 = base64.standard_b64encode(image_bytes).decode()
     client = anthropic.Anthropic(api_key=api_key)
     msg = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=20,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
-                {"type": "text", "text": (
-                    "This is a CAPTCHA image with exactly 5 alphanumeric characters. "
-                    "Reply with ONLY those characters, nothing else. No spaces, no punctuation."
-                )},
-            ],
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "This is a CAPTCHA image with exactly 5 alphanumeric characters. "
+                            "Reply with ONLY those characters, nothing else. No spaces, no punctuation."
+                        ),
+                    },
+                ],
+            }
+        ],
     )
     return msg.content[0].text.strip()
 
@@ -144,32 +174,34 @@ def _parse_tilde_response(raw: str) -> list[dict[str, Any]]:
         m = re.match(r"([A-Z][A-Z0-9.()\- ]*?)\s*/\s*(\d+)\s*/\s*(\d{4})", raw_ref)
         if not m:
             continue
-        case_type   = m.group(1).strip()
+        case_type = m.group(1).strip()
         case_number = m.group(2)
-        case_year   = int(m.group(3))
-        case_ref    = f"{case_type}/{case_number}/{case_year}"
+        case_year = int(m.group(3))
+        case_ref = f"{case_type}/{case_number}/{case_year}"
 
         party_text = re.sub(r"<[^>]+>", " ", parts[2]).strip()
         vs = re.split(r"\bversus\b|\bvs\.?\b", party_text, maxsplit=1, flags=re.IGNORECASE)
         petitioner = re.sub(r"\s+", " ", vs[0]).strip() or None if len(vs) >= 1 else None
         respondent = re.sub(r"\s+", " ", vs[1]).strip() or None if len(vs) == 2 else None
 
-        cnr      = parts[3].strip() if len(parts) > 3 else None
+        cnr = parts[3].strip() if len(parts) > 3 else None
         court_no = parts[4].strip() if len(parts) > 4 else None
-        token    = parts[7].strip() if len(parts) > 7 else None
+        token = parts[7].strip() if len(parts) > 7 else None
 
-        results.append({
-            "internal_id": internal_id or None,
-            "case_ref":    case_ref,
-            "case_type":   case_type,
-            "case_number": case_number,
-            "case_year":   case_year,
-            "petitioner":  petitioner,
-            "respondent":  respondent,
-            "cnr":         cnr or None,
-            "court_no":    court_no or None,
-            "token":       token or None,
-        })
+        results.append(
+            {
+                "internal_id": internal_id or None,
+                "case_ref": case_ref,
+                "case_type": case_type,
+                "case_number": case_number,
+                "case_year": case_year,
+                "petitioner": petitioner,
+                "respondent": respondent,
+                "cnr": cnr or None,
+                "court_no": court_no or None,
+                "token": token or None,
+            }
+        )
     return results
 
 
@@ -203,13 +235,13 @@ def _do_case_history(
         # Step 1: showRecords to get internal case_no + token
         payload = {
             "action_code": "showRecords",
-            "state_code":  state_cd,
-            "dist_code":   "1",
-            "court_code":  court_code,
-            "case_type":   case_type_id,
-            "case_no":     case_no.lstrip("0") or case_no,
-            "rgyear":      year,
-            "captcha":     captcha,
+            "state_code": state_cd,
+            "dist_code": "1",
+            "court_code": court_code,
+            "case_type": case_type_id,
+            "case_no": case_no.lstrip("0") or case_no,
+            "rgyear": year,
+            "captcha": captcha,
         }
         try:
             resp = sess.post(_QRY_URL, data=payload, timeout=15)
@@ -254,11 +286,11 @@ def _do_case_history(
                 data={
                     "court_code": court_code_r,
                     "state_code": state_cd,
-                    "dist_code":  "1",
-                    "case_no":    internal_case_no,
-                    "cino":       target_cino.upper(),
-                    "token":      token,
-                    "appFlag":    "",
+                    "dist_code": "1",
+                    "case_no": internal_case_no,
+                    "cino": target_cino.upper(),
+                    "token": token,
+                    "appFlag": "",
                 },
                 timeout=15,
             )
@@ -268,7 +300,23 @@ def _do_case_history(
 
         hist_raw = hist_resp.text
         log.debug("case_history o_civil len=%d", len(hist_raw))
-        return _parse_case_history(hist_raw, target_cino.upper())
+        result = _parse_case_history(hist_raw, target_cino.upper())
+
+        # Fetch order PDFs in same session (session cookies still valid)
+        for order in result.get("orders", []):
+            pdf_url = order.get("pdf_url")
+            if not pdf_url:
+                continue
+            try:
+                pdf_resp = sess.get(pdf_url, timeout=15)
+                ct = pdf_resp.headers.get("content-type", "")
+                if pdf_resp.ok and "pdf" in ct.lower():
+                    order["pdf_b64"] = base64.standard_b64encode(pdf_resp.content).decode()
+                    log.debug("pdf fetched order=%s size=%d", order.get("number"), len(pdf_resp.content))
+            except Exception as pdf_err:
+                log.debug("pdf_fetch skip: %s", pdf_err)
+
+        return result
 
     raise RuntimeError(f"CAPTCHA failed {MAX_TRIES} times (last: {last_error})")
 
@@ -281,126 +329,207 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
         for chunk in [c.strip() for c in raw.split("##") if c.strip()]:
             parts = chunk.split("~")
             if len(parts) >= 2:
-                hearings.append({
-                    "date": parts[0].strip(), "purpose": parts[1].strip(),
-                    "judge": parts[2].strip() if len(parts) > 2 else None,
-                    "next": parts[3].strip() if len(parts) > 3 else None,
-                })
+                hearings.append(
+                    {
+                        "date": parts[0].strip(),
+                        "purpose": parts[1].strip(),
+                        "judge": parts[2].strip() if len(parts) > 2 else None,
+                        "next": parts[3].strip() if len(parts) > 3 else None,
+                    }
+                )
         return {"cino": cino, "format": "tilde", "hearings": hearings}
 
     soup = BeautifulSoup(raw, "html.parser")
+    log.debug("parse_case_history html_len=%d", len(raw))
 
     def _text(tag) -> str:
-        return tag.get_text(" ", strip=True) if tag else ""
+        if not tag:
+            return ""
+        return _html.unescape(tag.get_text(" ", strip=True))
 
-    # ── Case Details ─────────────────────────────────────────────────────────
+    # ── Content-fingerprint table classifier ─────────────────────────────────
+    # Walk every table once; identify it by keywords in its text content.
+    # This is resilient to CSS class name changes and heading-proximity bugs.
+
     case_details: dict[str, str] = {}
-    det_table = soup.find("table", class_="case_details_table")
-    if det_table:
-        for row in det_table.find_all("tr"):
+    case_status: dict[str, str] = {}
+    acts: list[dict] = []
+    sub_court: dict[str, str] = {}
+    hearings: list[dict] = []
+    orders: list[dict] = []
+    category: dict[str, str] = {}
+    objections: list[dict] = []
+    documents: list[dict] = []
+
+    def _kv_table(tbl) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for row in tbl.find_all("tr"):
             cells = row.find_all(["td", "th"])
             for i in range(0, len(cells) - 1, 2):
-                label = cells[i].get_text(" ", strip=True).rstrip(":")
-                value = cells[i + 1].get_text(" ", strip=True)
+                label = _text(cells[i]).rstrip(":").strip()
+                value = _text(cells[i + 1]).strip()
                 if label and value:
-                    case_details[label] = value
+                    result[label] = value
+        return result
 
-    # ── Case Status ───────────────────────────────────────────────────────────
-    case_status: dict[str, str] = {}
-    st_table = soup.find("table", class_="table_r")
-    if st_table:
-        for row in st_table.find_all("tr"):
-            cells = row.find_all(["td", "th"])
-            if len(cells) >= 2:
-                label = cells[0].get_text(" ", strip=True).rstrip(":")
-                value = cells[1].get_text(" ", strip=True)
-                if label:
-                    case_status[label] = value
+    def _tbl_text(tbl) -> str:
+        return tbl.get_text(" ", strip=True).lower()
 
-    # ── Parties ───────────────────────────────────────────────────────────────
+    for tbl in soup.find_all("table"):
+        t = _tbl_text(tbl)
+
+        # ── Case Details: has CNR number ──────────────────────────────────
+        if not case_details and "cnr" in t and ("filing" in t or "registration" in t):
+            case_details = _kv_table(tbl)
+
+        # ── Case Status: has "first hearing date" or "stage of case" ─────
+        elif not case_status and ("first hearing" in t or "stage of case" in t or "next hearing" in t):
+            for row in tbl.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                if len(cells) >= 2:
+                    label = _text(cells[0]).rstrip(":")
+                    value = _text(cells[1])
+                    if label:
+                        case_status[label] = value
+                elif len(cells) == 1:
+                    raw = _text(cells[0])
+                    if ":" in raw:
+                        label, _, value = raw.partition(":")
+                        if label.strip():
+                            case_status[label.strip()] = value.strip()
+
+        # ── Acts: has "under act" header ──────────────────────────────────
+        elif not acts and "under act" in t:
+            rows = tbl.find_all("tr")
+            start = 1 if rows and "under act" in _text(rows[0]).lower() else 0
+            for row in rows[start:]:
+                cells = row.find_all("td")
+                if len(cells) >= 2:
+                    act_val = _text(cells[0])
+                    sec_val = _text(cells[1])
+                    if act_val or sec_val:
+                        acts.append({"act": act_val, "section": sec_val})
+
+        # ── Subordinate Court: has "court number and name" or "district" ──
+        elif not sub_court and ("court number and name" in t or ("district" in t and "state" in t and "case decision" in t)):
+            for row in tbl.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                if len(cells) >= 2:
+                    label = _text(cells[0]).rstrip(":")
+                    value = _text(cells[1])
+                    if label:
+                        sub_court[label] = value
+
+        # ── Hearing History: has "cause list type" and "purpose of hearing" ──
+        elif not hearings and "cause list type" in t and "purpose" in t:
+            for row in tbl.find_all("tr")[1:]:
+                cells = row.find_all("td")
+                if len(cells) < 4:
+                    continue
+                cause_list_type = _text(cells[0])
+                if cause_list_type == "Order Number":
+                    break
+                purpose = _text(cells[4]) if len(cells) > 4 else ""
+                if purpose == "View":
+                    continue
+                biz_link = cells[2].find("a")
+                biz_date = _text(biz_link) if biz_link else _text(cells[2])
+                hearings.append({
+                    "cause_list_type": cause_list_type,
+                    "judge": _text(cells[1]),
+                    "business_on": biz_date,
+                    "hearing_date": _text(cells[3]),
+                    "purpose": purpose,
+                })
+
+        # ── Orders: has "order number" and "order date" ───────────────────
+        elif not orders and "order number" in t and "order date" in t:
+            for row in tbl.find_all("tr")[1:]:
+                cells = row.find_all("td")
+                if len(cells) < 4:
+                    continue
+                pdf_link = cells[4].find("a") if len(cells) > 4 else None
+                href = pdf_link.get("href", "") if pdf_link else ""
+                pdf_url = (
+                    f"https://hcservices.ecourts.gov.in/ecourtindiaHC/{href.lstrip('/')}"
+                    if href else None
+                )
+                orders.append({
+                    "number": _text(cells[0]),
+                    "case": _text(cells[1]),
+                    "judge": _text(cells[2]),
+                    "date": _text(cells[3]),
+                    "pdf_url": pdf_url,
+                })
+
+        # ── Category: has "category" and "sub category" ───────────────────
+        elif not category and "sub category" in t and len(t) < 300:
+            category = _kv_table(tbl)
+
+        # ── Objections: has "scrutiny date" ───────────────────────────────
+        elif not objections and "scrutiny date" in t:
+            rows = tbl.find_all("tr")
+            if rows:
+                hdrs = [_text(c) for c in rows[0].find_all(["th", "td"])]
+                for row in rows[1:]:
+                    cells = row.find_all(["td", "th"])
+                    if cells:
+                        objections.append({hdrs[i]: _text(cells[i]) for i in range(min(len(hdrs), len(cells)))})
+
+        # ── Documents: has "document no" and "filed by" ───────────────────
+        elif not documents and "document no" in t and "filed by" in t:
+            rows = tbl.find_all("tr")
+            if rows:
+                hdrs = [_text(c) for c in rows[0].find_all(["th", "td"])]
+                for row in rows[1:]:
+                    cells = row.find_all(["td", "th"])
+                    if cells:
+                        documents.append({hdrs[i]: _text(cells[i]) for i in range(min(len(hdrs), len(cells)))})
+
+    # ── Parties (span-based, unchanged) ───────────────────────────────────────
     def _party_lines(cls: str) -> list[str]:
         span = soup.find("span", class_=cls)
         if not span:
             return []
-        lines = []
-        for part in span.decode_contents().split("<br"):
-            txt = BeautifulSoup(part, "html.parser").get_text(" ", strip=True)
-            if txt:
-                lines.append(txt)
-        return lines
+        for br in span.find_all("br"):
+            br.replace_with("\n")
+        lines = [_html.unescape(l.strip()) for l in span.get_text().split("\n")]
+        return [l for l in lines if l]
 
-    petitioners = _party_lines("Petitioner_Advocate_table")
-    respondents = _party_lines("Respondent_Advocate_table")
+    def _party_lines_any(classes: list[str]) -> list[str]:
+      for cls in classes:
+        lines = _party_lines(cls)
+        if lines:
+          return lines
+      return []
 
-    # ── Acts ──────────────────────────────────────────────────────────────────
-    acts: list[dict] = []
-    acts_table = soup.find("table", class_="Acts_table") or soup.find("table", id="act_table")
-    if acts_table:
-        for row in acts_table.find_all("tr")[1:]:
-            cells = row.find_all("td")
-            if len(cells) >= 2:
-                acts.append({"act": _text(cells[0]), "section": _text(cells[1])})
-
-    # ── Subordinate Court ─────────────────────────────────────────────────────
-    sub_court: dict[str, str] = {}
-    lower_span = soup.find("span", class_="Lower_court_table")
-    if lower_span:
-        for span in lower_span.find_all("span", style=lambda s: s and "200px" in s):
-            label = _text(span).rstrip(":")
-            label_tag = span.find_next_sibling("label")
-            value = _text(label_tag).lstrip(":").strip() if label_tag else ""
-            if label:
-                sub_court[label] = value
-
-    # ── Hearing History ───────────────────────────────────────────────────────
-    hearings: list[dict] = []
-    hist_table = soup.find("table", class_="history_table")
-    if hist_table:
-        for row in hist_table.find_all("tr")[1:]:
-            cells = row.find_all("td")
-            if len(cells) < 4:
-                continue
-            biz_link = cells[2].find("a") if len(cells) > 2 else None
-            biz_date = _text(biz_link) if biz_link else _text(cells[2])
-            hearings.append({
-                "cause_list_type": _text(cells[0]),
-                "judge":           _text(cells[1]),
-                "business_on":     biz_date,
-                "hearing_date":    _text(cells[3]),
-                "purpose":         _text(cells[4]) if len(cells) > 4 else "",
-            })
-
-    # ── Orders ────────────────────────────────────────────────────────────────
-    orders: list[dict] = []
-    ord_table = soup.find("table", class_="order_table")
-    if ord_table:
-        for row in ord_table.find_all("tr")[1:]:
-            cells = row.find_all("td")
-            if len(cells) < 4:
-                continue
-            pdf_link = cells[4].find("a") if len(cells) > 4 else None
-            href = pdf_link.get("href", "") if pdf_link else ""
-            pdf_url = (f"https://hcservices.ecourts.gov.in/ecourtindiaHC/{href.lstrip('/')}"
-                       if href else None)
-            orders.append({
-                "number": _text(cells[0]),
-                "case":   _text(cells[1]),
-                "judge":  _text(cells[2]),
-                "date":   _text(cells[3]),
-                "pdf_url": pdf_url,
-            })
+    petitioners = _party_lines_any([
+      "Petitioner",
+      "petitioner",
+      "Petitioner_Name",
+      "petitioner_name",
+    ])
+    respondents = _party_lines_any([
+      "Respondent",
+      "respondent",
+      "Respondent_Name",
+      "respondent_name",
+    ])
 
     return {
-        "cino":          cino,
-        "format":        "structured",
-        "case_details":  case_details,
-        "case_status":   case_status,
-        "petitioners":   petitioners,
-        "respondents":   respondents,
-        "acts":          acts,
-        "sub_court":     sub_court,
-        "hearings":      hearings,
-        "orders":        orders,
+        "cino": cino,
+        "format": "structured",
+        "case_details": case_details,
+        "case_status": case_status,
+        "petitioners": petitioners,
+        "respondents": respondents,
+        "acts": acts,
+        "sub_court": sub_court,
+        "hearings": hearings,
+        "orders": orders,
+        "category": category,
+        "objections": objections,
+        "documents": documents,
     }
 
 
@@ -427,13 +556,13 @@ def _do_case_search(
 
         payload = {
             "action_code": "showRecords",
-            "state_code":  state_cd,
-            "dist_code":   "1",
-            "court_code":  court_code,
-            "case_type":   case_type_id,
-            "case_no":     case_no.lstrip("0") or case_no,
-            "rgyear":      year,
-            "captcha":     captcha,
+            "state_code": state_cd,
+            "dist_code": "1",
+            "court_code": court_code,
+            "case_type": case_type_id,
+            "case_no": case_no.lstrip("0") or case_no,
+            "rgyear": year,
+            "captcha": captcha,
         }
         resp = sess.post(_QRY_URL, data=payload, timeout=15)
         resp.raise_for_status()
@@ -465,11 +594,31 @@ def _decode_cnr(cnr: str) -> tuple[str, str] | None:
     """
     # Map of 2-char state prefix in CNR → state_cd
     _STATE = {
-        "WB": "16", "MH": "1",  "AP": "2",  "KA": "3",  "KL": "4",
-        "HP": "5",  "AS": "6",  "JH": "7",  "BR": "8",  "RJ": "9",
-        "TN": "10", "OR": "11", "JK": "12", "UP": "13", "UT": "15",
-        "GJ": "17", "CG": "18", "TR": "20", "ML": "21", "PB": "22",
-        "MP": "23", "SK": "24", "MN": "25", "DL": "26", "TS": "29",
+        "WB": "16",
+        "MH": "1",
+        "AP": "2",
+        "KA": "3",
+        "KL": "4",
+        "HP": "5",
+        "AS": "6",
+        "JH": "7",
+        "BR": "8",
+        "RJ": "9",
+        "TN": "10",
+        "OR": "11",
+        "JK": "12",
+        "UP": "13",
+        "UT": "15",
+        "GJ": "17",
+        "CG": "18",
+        "TR": "20",
+        "ML": "21",
+        "PB": "22",
+        "MP": "23",
+        "SK": "24",
+        "MN": "25",
+        "DL": "26",
+        "TS": "29",
     }
     if len(cnr) < 4:
         return None
@@ -497,8 +646,8 @@ def _do_cnr_search(
     4. On first match: fetch history in same session and return
     """
     cnr = cnr.upper().strip()
-    cnr_year  = cnr[12:16] if len(cnr) >= 16 else ""
-    cnr_type  = cnr[4:6]   if len(cnr) >= 6  else ""
+    cnr_year = cnr[12:16] if len(cnr) >= 16 else ""
+    cnr_type = cnr[4:6] if len(cnr) >= 6 else ""
 
     page_url = _page_url(state_cd, court_code)
     sess = requests.Session()
@@ -512,7 +661,12 @@ def _do_cnr_search(
     try:
         types_resp = sess.post(
             _QRY_URL,
-            data={"action_code": "fillCaseType", "state_code": state_cd, "dist_code": "1", "court_code": court_code},
+            data={
+                "action_code": "fillCaseType",
+                "state_code": state_cd,
+                "dist_code": "1",
+                "court_code": court_code,
+            },
             timeout=15,
         )
         raw_types = types_resp.text.lstrip("﻿")
@@ -537,7 +691,9 @@ def _do_cnr_search(
     for type_id, type_name in sorted_types[:MAX_TYPE_TRIES]:
         # Fresh CAPTCHA per case type
         try:
-            cap_resp = sess.get(f"{_BASE}/securimage/securimage_show.php?{random.random()}", timeout=10)
+            cap_resp = sess.get(
+                f"{_BASE}/securimage/securimage_show.php?{random.random()}", timeout=10
+            )
             cap_resp.raise_for_status()
         except requests.RequestException:
             continue
@@ -550,9 +706,12 @@ def _do_cnr_search(
                 _QRY_URL,
                 data={
                     "action_code": "showRecords",
-                    "state_code": state_cd, "dist_code": "1", "court_code": court_code,
+                    "state_code": state_cd,
+                    "dist_code": "1",
+                    "court_code": court_code,
                     "case_type": type_id,
-                    "case_no": "1", "rgyear": cnr_year,  # year-only search with dummy no
+                    "case_no": "1",
+                    "rgyear": cnr_year,  # year-only search with dummy no
                     "captcha": captcha,
                 },
                 timeout=15,
@@ -581,9 +740,12 @@ def _do_cnr_search(
                 f"{_BASE}/cases/o_civil_case_history.php",
                 data={
                     "court_code": match.get("court_no") or court_code,
-                    "state_code": state_cd, "dist_code": "1",
-                    "case_no": internal_no, "cino": cnr,
-                    "token": token, "appFlag": "",
+                    "state_code": state_cd,
+                    "dist_code": "1",
+                    "case_no": internal_no,
+                    "cino": cnr,
+                    "token": token,
+                    "appFlag": "",
                 },
                 timeout=15,
             )
@@ -595,6 +757,7 @@ def _do_cnr_search(
 
 
 # ── API endpoints ────────────────────────────────────────────────────────────
+
 
 @router.get("/api/benches")
 async def get_benches(state_cd: str):
@@ -612,7 +775,12 @@ async def get_case_types(state_cd: str, court_code: str):
         sess.get(page_url, timeout=15)
         r = sess.post(
             _QRY_URL,
-            data={"action_code": "fillCaseType", "state_code": state_cd, "dist_code": "1", "court_code": court_code},
+            data={
+                "action_code": "fillCaseType",
+                "state_code": state_cd,
+                "dist_code": "1",
+                "court_code": court_code,
+            },
             timeout=15,
         )
         r.raise_for_status()
@@ -640,17 +808,19 @@ async def get_case_types(state_cd: str, court_code: str):
 @router.post("/api/search/case-no")
 async def search_by_case_no(request: Request):
     body = await request.json()
-    state_cd    = str(body.get("state_cd", ""))
-    court_code  = str(body.get("court_code", ""))
+    state_cd = str(body.get("state_cd", ""))
+    court_code = str(body.get("court_code", ""))
     case_type_id = str(body.get("case_type_id", ""))
-    case_no     = str(body.get("case_no", "")).strip()
-    year        = str(body.get("year", "")).strip()
+    case_no = str(body.get("case_no", "")).strip()
+    year = str(body.get("year", "")).strip()
 
     if not all([state_cd, court_code, case_type_id, case_no, year]):
         return JSONResponse({"error": "Missing required fields"}, status_code=400)
 
     settings = request.app.state.settings
-    api_key = getattr(settings, "anthropic_api_key", None) or __import__("os").getenv("ANTHROPIC_API_KEY", "")
+    api_key = getattr(settings, "anthropic_api_key", None) or __import__("os").getenv(
+        "ANTHROPIC_API_KEY", ""
+    )
     if not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
 
@@ -667,26 +837,41 @@ async def search_by_case_no(request: Request):
 @router.post("/api/case-history")
 async def get_case_history(request: Request):
     body = await request.json()
-    cino         = str(body.get("cino", "")).strip()
-    state_cd     = str(body.get("state_cd", "")).strip()
-    court_code   = str(body.get("court_code", "")).strip()
+    cino = str(body.get("cino", "")).strip()
+    state_cd = str(body.get("state_cd", "")).strip()
+    court_code = str(body.get("court_code", "")).strip()
     case_type_id = str(body.get("case_type_id", "")).strip()
-    case_no      = str(body.get("case_no", "")).strip()
-    year         = str(body.get("year", "")).strip()
+    case_no = str(body.get("case_no", "")).strip()
+    year = str(body.get("year", "")).strip()
 
     if not all([cino, state_cd, court_code, case_type_id, case_no, year]):
         return JSONResponse(
-            {"error": "Missing required fields: cino, state_cd, court_code, case_type_id, case_no, year"},
+            {
+                "error": "Missing required fields: cino, state_cd, court_code, case_type_id, case_no, year"
+            },
             status_code=400,
         )
 
     settings = request.app.state.settings
-    api_key = getattr(settings, "anthropic_api_key", None) or __import__("os").getenv("ANTHROPIC_API_KEY", "")
+    api_key = getattr(settings, "anthropic_api_key", None) or os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
 
+    db = get_db(request)
+    ttl_seconds = int(os.getenv("CASE_HISTORY_CACHE_TTL_SECONDS", "3600"))
+    try:
+      cached = db.get_case_history_cache(cino, state_cd, court_code, ttl_seconds)
+      if cached:
+        return cached
+    except Exception as exc:
+      log.warning("case_history cache lookup failed: %s", exc)
+
     try:
         result = _do_case_history(state_cd, court_code, case_type_id, case_no, year, cino, api_key)
+        try:
+            db.set_case_history_cache(cino, state_cd, court_code, case_type_id, case_no, year, result)
+        except Exception as exc:
+            log.warning("case_history cache write failed: %s", exc)
         return result
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
@@ -698,8 +883,8 @@ async def get_case_history(request: Request):
 @router.post("/api/search/cnr")
 async def search_by_cnr(request: Request):
     body = await request.json()
-    cnr        = str(body.get("cnr", "")).strip()
-    state_cd   = str(body.get("state_cd", "")).strip()
+    cnr = str(body.get("cnr", "")).strip()
+    state_cd = str(body.get("state_cd", "")).strip()
     court_code = str(body.get("court_code", "")).strip()
 
     if not cnr or len(cnr) != 16:
@@ -711,12 +896,17 @@ async def search_by_cnr(request: Request):
         if decoded:
             state_cd, court_code = decoded
         else:
-            return JSONResponse({"error": "Cannot determine HC from CNR. Please select HC and bench."}, status_code=400)
+            return JSONResponse(
+                {"error": "Cannot determine HC from CNR. Please select HC and bench."},
+                status_code=400,
+            )
     if not court_code:
         court_code = "3" if state_cd == "16" else "1"
 
     settings = request.app.state.settings
-    api_key = getattr(settings, "anthropic_api_key", None) or __import__("os").getenv("ANTHROPIC_API_KEY", "")
+    api_key = getattr(settings, "anthropic_api_key", None) or __import__("os").getenv(
+        "ANTHROPIC_API_KEY", ""
+    )
     if not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
 
@@ -724,7 +914,9 @@ async def search_by_cnr(request: Request):
         result = _do_cnr_search(cnr, state_cd, court_code, api_key)
         if result is None:
             return JSONResponse(
-                {"error": "Case not found. The CNR may belong to a different bench — try selecting a different bench."},
+                {
+                    "error": "Case not found. The CNR may belong to a different bench — try selecting a different bench."
+                },
                 status_code=404,
             )
         return result

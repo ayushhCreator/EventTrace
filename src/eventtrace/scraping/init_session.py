@@ -27,6 +27,7 @@ def _table_has_data(page) -> bool:
 
 def main() -> None:
     from ..core.logging_setup import configure_logging
+
     configure_logging()
 
     settings = Settings(headless=False)

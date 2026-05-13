@@ -229,18 +229,14 @@ class SQLAlchemyAuthRepository:
     def revoke_refresh_token(self, token_hash: str) -> None:
         with Session(self._engine) as session:
             session.execute(
-                update(RefreshToken)
-                .where(RefreshToken.token_hash == token_hash)
-                .values(revoked=1)
+                update(RefreshToken).where(RefreshToken.token_hash == token_hash).values(revoked=1)
             )
             session.commit()
 
     def revoke_all_user_refresh_tokens(self, user_id: str) -> None:
         with Session(self._engine) as session:
             session.execute(
-                update(RefreshToken)
-                .where(RefreshToken.user_id == user_id)
-                .values(revoked=1)
+                update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=1)
             )
             session.commit()
 

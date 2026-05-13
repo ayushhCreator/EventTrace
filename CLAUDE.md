@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Deployment (GCP)
+
+Cloud Build trigger watches `deploy` branch only — NOT `main`. Push to `main` freely during dev.
+
+**To deploy to production (do once at night):**
+```bash
+git push origin main:deploy
+```
+
+Machine type: `E2_MEDIUM` (set in `cloudbuild.yaml` `options.machineType`). Do NOT upgrade to `E2_HIGHCPU_8` — too expensive.
+
 ## Setup
 
 ```bash

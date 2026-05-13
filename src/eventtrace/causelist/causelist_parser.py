@@ -12,11 +12,14 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any
 
-import structlog
+try:
+    import structlog  # type: ignore
 
-from bs4 import BeautifulSoup
+    log = structlog.get_logger()
+except Exception:  # pragma: no cover
+    import logging
 
-log = structlog.get_logger()
+    log = logging.getLogger(__name__)
 
 # ── URL ──────────────────────────────────────────────────────────────────────
 
@@ -117,10 +120,25 @@ def _fetch_playwright(url: str, timeout: int) -> str | None:
 
 
 def html_to_text(html: str) -> str:
-    soup = BeautifulSoup(html, "lxml")
-    for tag in soup.find_all(["br", "p", "div", "tr"]):
-        tag.insert_after("\n")
-    text = soup.get_text("\n")
+    try:
+        from bs4 import BeautifulSoup  # type: ignore
+
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup.find_all(["br", "p", "div", "tr"]):
+            tag.insert_after("\n")
+        text = soup.get_text("\n")
+    except Exception:
+        # Fallback for minimal environments (no bs4/lxml). Good enough for
+        # court splitting + section/case parsing in CHC legacy HTML.
+        import html as _html
+
+        text = html
+        text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
+        text = re.sub(r"(?i)</\s*(p|div|tr|td|th|li)\s*>", "\n", text)
+        text = re.sub(r"(?s)<style.*?>.*?</style>", "\n", text)
+        text = re.sub(r"(?s)<script.*?>.*?</script>", "\n", text)
+        text = re.sub(r"(?s)<[^>]+>", "", text)
+        text = _html.unescape(text)
     # Normalise Windows line endings + encoding artefacts
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("–", "-").replace("—", "-")
@@ -130,7 +148,9 @@ def html_to_text(html: str) -> str:
 
 # ── Split into per-court blocks ───────────────────────────────────────────────
 
-_COURT_SPLIT_RE = re.compile(r"(?=(?:^|\n)COURT\s+NO[\.\s:]*\s*\d+)", re.IGNORECASE | re.MULTILINE)
+_COURT_SPLIT_RE = re.compile(
+    r"(?=(?:^|\n)\s*COURT\s+NO[\.\s:]*\s*\d+)", re.IGNORECASE | re.MULTILINE
+)
 
 
 def split_court_blocks(text: str) -> list[str]:
@@ -151,8 +171,14 @@ _DATE_RE = re.compile(r"For\s+\w+\s+The\s+(\d+(?:st|nd|rd|th)?)\s+(\w+)\s+(\d{4}
 _NOT_SITTING_RE = re.compile(r"NOT\s+SITTING\s+ON\s+([\d\.]+)", re.IGNORECASE)
 _VC_LINK_RE = re.compile(r"VC\s+LINK\s*:\s*(https?://\S+)", re.IGNORECASE)
 _AT_TIME_RE = re.compile(r"\bAT\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM|NOON|NOON\b))", re.IGNORECASE)
-_FLOOR_RE = re.compile(r"\b((?:FIRST|SECOND|THIRD|FOURTH|FIFTH|GROUND|\d+(?:ST|ND|RD|TH)?)\s+FLOOR)\b", re.IGNORECASE)
-_BUILDING_RE = re.compile(r"\b((?:MAIN|ANNEXE|ANNEX|NEW|OLD|NORTH|SOUTH|EAST|WEST)\s+BUILDING)\b", re.IGNORECASE)
+_FLOOR_RE = re.compile(
+    r"\b((?:FIRST|SECOND|THIRD|FOURTH|FIFTH|GROUND|\d+(?:ST|ND|RD|TH)?)\s+FLOOR)\b", re.IGNORECASE
+)
+_BUILDING_RE = re.compile(
+    r"\b((?:MAIN|ANNEXE|ANNEX|NEW|OLD|NORTH|SOUTH|EAST|WEST)\s+BUILDING)\b", re.IGNORECASE
+)
+_BENCH_ID_RE = re.compile(r"Bench\s+ID\s*-\s*(\d+)", re.IGNORECASE)
+_NOTE_SECTION_START_RE = re.compile(r"\bNOTE\s*:", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1,
@@ -192,13 +218,22 @@ def _parse_date_from_block(block: str) -> str | None:
 
 
 def _extract_jurisdiction(block: str) -> str | None:
-    # Everything between last HON'BLE line and VC LINK (or end)
+    # Everything between last HON'BLE line and VC LINK (or first case serial)
     judge_matches = list(_JUDGE_RE.finditer(block))
     if not judge_matches:
         return None
     start = judge_matches[-1].end()
-    vc_m = _VC_LINK_RE.search(block)
-    end = vc_m.start() if vc_m else len(block)
+
+    # End at VC LINK or NOTE section or first case (Serial 1)
+    limiters = [
+        _VC_LINK_RE.search(block, start),
+        _NOTE_SECTION_START_RE.search(block, start),
+        re.compile(r"\n\s*1\s*\n").search(block, start),
+    ]
+
+    found_ends = [m.start() for m in limiters if m]
+    end = min(found_ends) if found_ends else len(block)
+
     chunk = block[start:end].strip()
     return chunk if chunk else None
 
@@ -226,33 +261,168 @@ def _canonical_side(raw: str | None) -> str | None:
     return normalised or None
 
 
+def parse_scheduling_notes(block: str) -> dict[str, Any]:
+    """Extract NOTE: block into structured dict (Gap 1)."""
+    note_m = _NOTE_BLOCK_START_RE.search(block)
+    if not note_m:
+        return {
+            "raw_notes": [],
+            "day_order": {},
+            "hearing_start_time": None,
+            "mentioning_allowed": False,
+        }
+
+    notes_text = block[note_m.end() :]
+    vc_m = _VC_LINK_RE.search(notes_text)
+    if vc_m:
+        notes_text = notes_text[: vc_m.start()]
+
+    raw_notes = [m.group(1).strip() for m in _ROMAN_NOTE_RE.finditer(notes_text)]
+
+    # Split notes into per-numeral chunks for accurate day_order extraction
+    roman_positions = [
+        (m.start(), m.end())
+        for m in re.finditer(
+            r"^(?:I{1,4}|IV|V|VI{1,3}|IX|X{1,2}I{0,3}|XI{1,3}|XIV|XV)\.\s+",
+            notes_text,
+            re.IGNORECASE | re.MULTILINE,
+        )
+    ]
+    note_chunks: list[str] = []
+    for idx, (start, _) in enumerate(roman_positions):
+        next_start = (
+            roman_positions[idx + 1][0] if idx + 1 < len(roman_positions) else len(notes_text)
+        )
+        note_chunks.append(notes_text[start:next_start])
+
+    day_order: dict[str, list[str]] = {}
+    for chunk in note_chunks:
+        day_m = _DAY_RE.search(chunk)
+        if not day_m:
+            continue
+        day = day_m.group(1).lower()
+        order_items: list[tuple[int, str]] = []
+        for pm in re.finditer(r"\bPIL\b", chunk, re.IGNORECASE):
+            order_items.append((pm.start(), "PIL"))
+        for wm in re.finditer(r"\bWP\.CT\b", chunk, re.IGNORECASE):
+            order_items.append((wm.start(), "WP.CT"))
+        for gm in _GROUP_MENTION_RE.finditer(chunk):
+            order_items.append((gm.start(), f"GROUP_{gm.group(1).upper()}"))
+        order_items.sort(key=lambda x: x[0])
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for _, label in order_items:
+            if label not in seen:
+                seen.add(label)
+                deduped.append(label)
+        if day not in day_order:
+            day_order[day] = deduped
+
+    hearing_time_m = _HEARING_TIME_RE.search(notes_text)
+    hearing_start_time = hearing_time_m.group(1).strip() if hearing_time_m else None
+
+    return {
+        "raw_notes": raw_notes,
+        "day_order": day_order,
+        "hearing_start_time": hearing_start_time,
+        "mentioning_allowed": bool(_MENTIONING_RE.search(notes_text)),
+    }
+
+
+def _extract_jurisdiction_groups(jurisdiction_text: str | None) -> list[str]:
+    """Extract group/type mentions from jurisdiction notes."""
+    if not jurisdiction_text:
+        return []
+    groups: list[str] = []
+    seen: set[str] = set()
+    jt = jurisdiction_text.upper()
+    if re.search(r"\bPUBLIC\s+INTEREST\s+LITIGATION\b|\bPIL\b", jt):
+        groups.append("PIL")
+        seen.add("PIL")
+    if re.search(r"\bTRIBUNAL\b|\bWP\.CT\b", jt):
+        groups.append("TRIBUNAL")
+        seen.add("TRIBUNAL")
+    for gm in _GROUP_MENTION_RE.finditer(jt):
+        label = f"GROUP_{gm.group(1).upper()}"
+        if label not in seen:
+            groups.append(label)
+            seen.add(label)
+    return groups
+
+
 def parse_court_header(block: str) -> dict[str, Any]:
     clean_block = block.replace("\xa0", " ")
+    
+    # Detect side ONLY in the header portion (before judges/notes)
+    # to avoid false positives from jurisdictional notes mentioning other sides.
+    header_end = clean_block.find("HON'BLE")
+    if header_end == -1:
+        header_end = clean_block.find("COURT NO")
+    if header_end == -1:
+        header_end = 500 # fallback
+    header_chunk = clean_block[:header_end]
+    
     judges = [_clean(m.group(1)) for m in _JUDGE_RE.finditer(clean_block) if m.group(1).strip()]
+    jurisdiction_notes = _extract_jurisdiction(clean_block)
+    sched = parse_scheduling_notes(clean_block)
+    jur_groups = _extract_jurisdiction_groups(jurisdiction_notes)
+    
     return {
         "court_no": _first_group(_COURT_NO_RE, clean_block),
         "bench_label": _clean(_first_group(_BENCH_RE, clean_block, 1)),
-        "side": _canonical_side(_first_group(_SIDE_RE, clean_block, 0)),
+        "side": _canonical_side(_first_group(_SIDE_RE, header_chunk, 0)),
         "list_type": (_first_group(_LIST_TYPE_RE, clean_block, 1) or "").upper() or None,
         "list_date": _parse_date_from_block(clean_block),
         "judges": judges,
         "not_sitting": bool(_NOT_SITTING_RE.search(clean_block)),
         "vc_link": _first_group(_VC_LINK_RE, clean_block),
-        "jurisdiction_notes": _extract_jurisdiction(clean_block),
+        "jurisdiction_notes": jurisdiction_notes,
         "at_time": _first_group(_AT_TIME_RE, clean_block),
         "floor": _first_group(_FLOOR_RE, clean_block),
         "building": _first_group(_BUILDING_RE, clean_block),
+        "bench_id": _first_group(_BENCH_ID_RE, clean_block),
+        "scheduling_notes_json": sched,
+        "hearing_start_time": sched.get("hearing_start_time"),
+        "mentioning_allowed": sched.get("mentioning_allowed", False),
+        "jurisdiction_groups": jur_groups,
     }
 
 
 # ── Case parsing ──────────────────────────────────────────────────────────────
 
 _SERIAL_RE = re.compile(r"^\d+$")
-_CASE_REF_RE = re.compile(r"^([A-Z][A-Z\.\(\)\-]*(?:\([A-Z\(\)]+\))?)\s*/\s*(\d+)\s*/\s*(\d{4})\s*$")
+_CASE_REF_RE = re.compile(
+    r"^([A-Z][A-Z\.\(\)\-]*(?:\([A-Z\(\)]+\))?)\s*/\s*(\d+)\s*/\s*(\d{4})\s*$"
+)
 _IA_RE = re.compile(r"^IA\s+NO\s*:\s*([A-Z]+(?:\([A-Z]+\))?/\d+/\d{4})", re.IGNORECASE)
 _SUBSEC_RE = re.compile(r"^\(([A-Z][A-Z\s\-IX/&\.]+)\)\s*$")
 # All-caps line = section header candidate
 _ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z\s\-\(\)/&\.0-9]+$")
+
+
+def _normalize_section_header(line: str) -> str | None:
+    """Normalise noisy heading lines from scraped causelist text.
+
+    Some lists contain wrapper headings like 'IN OFR JUDGMENT' or transitional
+    phrases like 'AFTER THAT IN OLD CONTEMPT'. These should not become their own
+    sections, otherwise cases get mis-grouped in downstream UIs.
+    """
+    raw = re.sub(r"\s+", " ", (line or "").replace("\xa0", " ")).strip()
+    if not raw:
+        return None
+
+    upper = raw.upper()
+
+    # Wrapper heading sometimes printed above "FOR JUDGMENT".
+    if upper in {"IN OFR JUDGMENT", "IN OFR JUDGEMENT"}:
+        return None
+
+    # Transitional phrasing: keep only the meaningful part.
+    m = re.match(r"^AFTER\s+THAT\s+IN\s+(.+)$", upper)
+    if m:
+        return m.group(1).strip() or None
+
+    return upper
 
 _CASE_TYPE_NORM: dict[str, str] = {
     "W.P.A.": "WPA",
@@ -311,20 +481,67 @@ _CASE_TYPE_NORM: dict[str, str] = {
     "IA": "IA",
 }
 
-_SECTION_TAGS: dict[str, str] = {
-    "POLICE INACTION": "GROUP_IX",
-    "GROUP - IX": "GROUP_IX",
+_CANONICAL_SECTIONS: dict[str, str] = {
+    "FOR JUDGMENT": "JUDGMENT",
+    "OLD CONTEMPT": "CONTEMPT",
+    "POLICE INACTION": "GROUP_IX_CONTEMPT",
     "PIL": "PIL",
     "PUBLIC INTEREST LITIGATION": "PIL",
     "TRIBUNAL MOTION": "TRIBUNAL",
     "TRIBUNAL HEARING": "TRIBUNAL",
     "WP.CT": "TRIBUNAL",
-    "GROUP - VI": "GROUP_VI",
+    "FOR DISMISSAL": "DISMISSAL",
+    "APPLICATION": "APPLICATION",
+    "MENTIONING": "MENTIONING",
+    "SUPPLEMENTARY": "SUPPLEMENTARY",
     "CONTEMPT": "CONTEMPT",
     "REVIEW": "REVIEW",
+    "GROUP - I": "GROUP_I",
+    "GROUP - II": "GROUP_II",
+    "GROUP - III": "GROUP_III",
+    "GROUP - IV": "GROUP_IV",
+    "GROUP - V": "GROUP_V",
+    "GROUP - VI": "GROUP_VI",
+    "GROUP - VII": "GROUP_VII",
+    "GROUP - VIII": "GROUP_VIII",
+    "GROUP - IX": "GROUP_IX",
 }
 
+_GROUP_NO_RE = re.compile(r"\bGROUP\s*[-]\s*(I{1,3}|IV|V|VI{1,3}|IX|X|\d+)\b", re.IGNORECASE)
+
 _HEARING_KEYWORDS = ["MOTION", "HEARING", "APPEAL"]
+
+# ── Scheduling notes regexes (Gap 1) ─────────────────────────────────────────
+
+_NOTE_BLOCK_START_RE = re.compile(r"\bNOTE\s*:", re.IGNORECASE)
+_ROMAN_NOTE_RE = re.compile(
+    r"^(?:I{1,4}|IV|V|VI{1,3}|IX|X{1,2}I{0,3}|XI{1,3}|XIV|XV)\.\s+(.+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_HEARING_TIME_RE = re.compile(r"AT\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM|NOON))", re.IGNORECASE)
+_DAY_RE = re.compile(
+    r"ON\s+EVERY\s+(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)",
+    re.IGNORECASE,
+)
+_MENTIONING_RE = re.compile(r"MENTIONING\s+WILL\s+BE\s+ALLOWED", re.IGNORECASE)
+_GROUP_MENTION_RE = re.compile(r"\bGROUP[-\s]*(I{1,3}|IV|V|VI{1,3}|IX|X|\d+)\b", re.IGNORECASE)
+
+# ── Inline case annotation regexes (Gap 2) ───────────────────────────────────
+
+_CASE_TIME_ANNOT_RE = re.compile(
+    r"^\(AT\s+\d{1,2}(?::\d{2})?\s*(?:A\.?M\.?|P\.?M\.?|NOON)\s*\)",
+    re.IGNORECASE,
+)
+_PART_HEARD_RE = re.compile(r"\(PART[-\s]?HEARD\)", re.IGNORECASE)
+_NEXT_DATE_RE = re.compile(r"^\((\d{2})\.(\d{2})\.(\d{4})\)$")
+_ANNOT_LINE_RE = re.compile(
+    r"^\((?:AT\s+\d|PART[-\s]?HEARD|\d{2}\.\d{2}\.\d{4})",
+    re.IGNORECASE,
+)
+
+# ── "With" case regex (Gap 3) ────────────────────────────────────────────────
+
+_WITH_SERIAL_RE = re.compile(r"^wt(\d+)\s*$", re.IGNORECASE)
 
 
 def _normalize_case_type(raw: str) -> str:
@@ -352,17 +569,21 @@ def _normalize_advocate(raw: str | None) -> str | None:
     return s.strip() or None
 
 
-def _classify_section(section: str | None, subsection: str | None) -> tuple[str | None, str | None]:
+def _classify_section(
+    section: str | None, subsection: str | None
+) -> tuple[str | None, str | None, str | None, str | None]:
     s = (section or "").upper()
     sub = (subsection or "").upper()
-    category = next((v for k, v in _SECTION_TAGS.items() if k in s), section)
+    category = next((v for k, v in _CANONICAL_SECTIONS.items() if k in s), section)
     h_type = next((k for k in _HEARING_KEYWORDS if k in s or k in sub), None)
-    return category, h_type
+    canonical = next((v for k, v in _CANONICAL_SECTIONS.items() if k in s), None)
+    group_m = _GROUP_NO_RE.search(s)
+    group_no = group_m.group(1).upper() if group_m else None
+    return category, h_type, canonical, group_no
 
 
 def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
     """State-machine parser. Each HTML element renders on its own line."""
-    # Normalise non-breaking spaces, strip each line
     lines = [ln.replace("\xa0", " ").strip() for ln in block.splitlines()]
     non_empty = [ln for ln in lines if ln]
 
@@ -370,7 +591,6 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
     current_section: str | None = None
     current_subsection: str | None = None
 
-    # State for current case being built
     serial: int | None = None
     case_ref: str | None = None
     case_type: str | None = None
@@ -384,11 +604,22 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
     raw_lines: list[str] = []
     after_vs = False
     after_respondent = False
+    # Gap 2: inline annotations
+    case_time_annotation: str | None = None
+    is_part_heard = False
+    next_date_annotation: str | None = None
+    # Gap 3: "with" case tracking
+    is_with_case = False
+    parent_serial_no: int | None = None
+    last_flushed_serial: int | None = None
 
     def _flush() -> None:
         nonlocal serial, case_ref, case_type, case_number, case_year
         nonlocal pet_parts, respondent, advocate, ia_numbers, pro_se
         nonlocal raw_lines, after_vs, after_respondent
+        nonlocal case_time_annotation, is_part_heard, next_date_annotation
+        nonlocal is_with_case, parent_serial_no, last_flushed_serial
+
         if serial is None or case_ref is None:
             serial = case_ref = case_type = case_number = case_year = None
             pet_parts = []
@@ -397,9 +628,15 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             respondent = advocate = None
             pro_se = False
             after_vs = after_respondent = False
+            case_time_annotation = next_date_annotation = None
+            is_part_heard = False
+            is_with_case = False
+            parent_serial_no = None
             return
 
-        cat, h_type = _classify_section(current_section, current_subsection)
+        cat, h_type, canonical_section, group_no = _classify_section(
+            current_section, current_subsection
+        )
         cases.append(
             {
                 "serial_no": serial,
@@ -416,8 +653,19 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
                 "subsection": current_subsection,
                 "hearing_type": h_type,
                 "raw_text": "\n".join(raw_lines),
+                # Gap 4
+                "canonical_section": canonical_section,
+                "group_no": group_no,
+                # Gap 2
+                "case_time_annotation": case_time_annotation,
+                "is_part_heard": is_part_heard,
+                "next_date_annotation": next_date_annotation,
+                # Gap 3
+                "is_with_case": is_with_case,
+                "parent_serial_no": parent_serial_no,
             }
         )
+        last_flushed_serial = serial
         serial = case_ref = case_type = case_number = case_year = None
         pet_parts = []
         ia_numbers = []
@@ -425,6 +673,10 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
         respondent = advocate = None
         pro_se = False
         after_vs = after_respondent = False
+        case_time_annotation = next_date_annotation = None
+        is_part_heard = False
+        is_with_case = False
+        parent_serial_no = None
 
     i = 0
     while i < len(non_empty):
@@ -438,6 +690,17 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
+        # Gap 3: "with" serial (wt18) → linked case
+        wt_m = _WITH_SERIAL_RE.match(line)
+        if wt_m:
+            _flush()
+            serial = int(wt_m.group(1))
+            is_with_case = True
+            parent_serial_no = last_flushed_serial
+            raw_lines = [line]
+            i += 1
+            continue
+
         # Serial number alone → start new case
         if _SERIAL_RE.match(line):
             _flush()
@@ -446,10 +709,16 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
-        # Section headers only appear between cases (serial is None)
-        if serial is None and _ALL_CAPS_RE.match(line) and line != "VS" and len(line) < 100:
-            if not _CASE_REF_RE.match(line):
-                current_section = line
+        # Section headers usually appear between cases, but some lists insert
+        # them immediately after the last line of a case. Treat such a header
+        # as a boundary and flush the current case first.
+        if _ALL_CAPS_RE.match(line) and line != "VS" and len(line) < 100 and not _CASE_REF_RE.match(line):
+            if serial is not None and case_ref is not None and advocate is not None:
+                _flush()
+            if serial is None:
+                normalized = _normalize_section_header(line)
+                if normalized is not None:
+                    current_section = normalized
                 current_subsection = None
                 if i + 1 < len(non_empty):
                     sub_m = _SUBSEC_RE.match(non_empty[i + 1])
@@ -474,8 +743,21 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
                 case_ref = f"{case_type}/{case_number}/{case_year}"
                 raw_lines.append(line)
                 i += 1
+                # Gap 2: consume annotation lines immediately after case ref
+                while i < len(non_empty):
+                    annot_line = non_empty[i]
+                    if not _ANNOT_LINE_RE.match(annot_line):
+                        break
+                    if _CASE_TIME_ANNOT_RE.match(annot_line):
+                        case_time_annotation = annot_line
+                    if _PART_HEARD_RE.search(annot_line):
+                        is_part_heard = True
+                    nd_m = _NEXT_DATE_RE.match(annot_line)
+                    if nd_m:
+                        next_date_annotation = f"{nd_m.group(3)}-{nd_m.group(2)}-{nd_m.group(1)}"
+                    raw_lines.append(annot_line)
+                    i += 1
                 continue
-            # Unexpected line before case ref — skip
             i += 1
             continue
 
@@ -502,8 +784,6 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             continue
 
         if advocate is None:
-            # Next line is advocate (could be all-caps name)
-            # Only skip if it's a serial number (handled above already)
             if "PETITIONER IN PERSON" in line.upper():
                 pro_se = True
             advocate = line
@@ -511,8 +791,6 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
-        # After advocate: only IA lines expected; anything else ends this case
-        # (handled by serial detection at top of loop)
         i += 1
 
     _flush()
@@ -528,8 +806,21 @@ def parse_causelist(html: str, for_date: date | None = None) -> list[dict[str, A
     blocks = split_court_blocks(text)
     results: list[dict[str, Any]] = []
 
-    for block in blocks:
+    for i, block in enumerate(blocks):
         header = parse_court_header(block)
+
+        # Due to splitting at 'COURT NO', the 'APPELLATE SIDE' header for court N
+        # often ends up at the very end of block N-1. Peek back if side is missing.
+        if header["side"] is None and i > 0:
+            prev_block = blocks[i - 1]
+            # Look at the last few hundred characters of the previous block
+            m = _SIDE_RE.search(prev_block[-500:])
+            if m:
+                header["side"] = _canonical_side(m.group(0))
+
+        if header["court_no"] is None:
+            continue
+
         if header["list_date"] is None and for_date is not None:
             header["list_date"] = for_date.isoformat()
         cases = parse_cases_from_block(block)
@@ -556,6 +847,7 @@ def main() -> None:
     import sys
 
     from ..core.logging_setup import configure_logging
+
     configure_logging()
 
     from datetime import timedelta

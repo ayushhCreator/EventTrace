@@ -8,6 +8,7 @@ Flow:
   5. Parse HTML → case details
   6. Retry up to MAX_TRIES if CAPTCHA rejected
 """
+
 from __future__ import annotations
 
 import base64
@@ -23,8 +24,8 @@ log = structlog.get_logger()
 
 _BASE = "https://hcservices.ecourts.gov.in/ecourtindiaHC"
 _PAGE_URL = f"{_BASE}/cases/case_no.php?state_cd=16&dist_cd=1&court_code=3&stateNm=Calcutta"
-_QRY_URL  = f"{_BASE}/cases/case_no_qry.php"
-_HEADERS  = {
+_QRY_URL = f"{_BASE}/cases/case_no_qry.php"
+_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
     "Referer": _PAGE_URL,
 }
@@ -32,26 +33,81 @@ MAX_TRIES = 3
 
 # eCourts case-type abbrev → numeric ID (Appellate Side, Calcutta HC)
 CASE_TYPE_IDS: dict[str, int] = {
-    "AD-COM": 73, "AO-COM": 72, "AST": 41, "CCGAT": 38,
-    "CO": 15, "CO.CT": 34, "COLRT": 40, "CO.ST": 35, "COT": 27, "CO.TT": 36,
-    "CPAN": 13, "CR": 14, "CRA": 11, "CRA (DB)": 55, "CRA (SB)": 54,
-    "CRC": 42, "CR-IPD": 68, "CRLCP": 46,
-    "CRM": 17, "CRM (A)": 58, "CRM (DB)": 57, "CRM (FEMA)": 62,
-    "CRM (FERA)": 61, "CRM(M)": 74, "CRM (NDPS)": 60, "CRM(R)": 75,
-    "CRM (SB)": 56, "CRMSPL": 3, "CRM (TADA)": 59,
-    "CRR": 16, "DR": 18, "DVW": 1,
-    "FA": 9, "FA-IPD": 64, "FAT": 6, "FAT-IPD": 65, "FCA": 30,
-    "FMA": 19, "FMA-IPD": 66, "FMAT": 8, "FMAT (ARBAWARD)": 53,
-    "FMAT-IPD": 67, "FMAT (IR)": 51, "FMAT (MV)": 52,
-    "FMAT (RERA)": 71, "FMAT (WC)": 50,
-    "GA": 26, "IRD": 22, "IRE": 23, "IRH": 24,
-    "LPA": 2, "MA": 21, "MAT": 25,
-    "RVW": 20, "RVW-IPD": 69,
-    "SA": 10, "SAT": 7, "SMA": 29, "SMAT": 28,
-    "SRC": 4, "SRCR": 5, "TRP(COMM)": 63, "WCGAT": 37,
-    "WPA": 12, "WPA(H)": 49, "WPA-IPD": 70, "WPA(P)": 48,
-    "WPCR": 44, "WPCRC": 43, "WP.CT": 31, "WPDRT": 47,
-    "WPLRT": 39, "WP.ST": 32, "WP.TT": 33, "WP.WT": 45,
+    "AD-COM": 73,
+    "AO-COM": 72,
+    "AST": 41,
+    "CCGAT": 38,
+    "CO": 15,
+    "CO.CT": 34,
+    "COLRT": 40,
+    "CO.ST": 35,
+    "COT": 27,
+    "CO.TT": 36,
+    "CPAN": 13,
+    "CR": 14,
+    "CRA": 11,
+    "CRA (DB)": 55,
+    "CRA (SB)": 54,
+    "CRC": 42,
+    "CR-IPD": 68,
+    "CRLCP": 46,
+    "CRM": 17,
+    "CRM (A)": 58,
+    "CRM (DB)": 57,
+    "CRM (FEMA)": 62,
+    "CRM (FERA)": 61,
+    "CRM(M)": 74,
+    "CRM (NDPS)": 60,
+    "CRM(R)": 75,
+    "CRM (SB)": 56,
+    "CRMSPL": 3,
+    "CRM (TADA)": 59,
+    "CRR": 16,
+    "DR": 18,
+    "DVW": 1,
+    "FA": 9,
+    "FA-IPD": 64,
+    "FAT": 6,
+    "FAT-IPD": 65,
+    "FCA": 30,
+    "FMA": 19,
+    "FMA-IPD": 66,
+    "FMAT": 8,
+    "FMAT (ARBAWARD)": 53,
+    "FMAT-IPD": 67,
+    "FMAT (IR)": 51,
+    "FMAT (MV)": 52,
+    "FMAT (RERA)": 71,
+    "FMAT (WC)": 50,
+    "GA": 26,
+    "IRD": 22,
+    "IRE": 23,
+    "IRH": 24,
+    "LPA": 2,
+    "MA": 21,
+    "MAT": 25,
+    "RVW": 20,
+    "RVW-IPD": 69,
+    "SA": 10,
+    "SAT": 7,
+    "SMA": 29,
+    "SMAT": 28,
+    "SRC": 4,
+    "SRCR": 5,
+    "TRP(COMM)": 63,
+    "WCGAT": 37,
+    "WPA": 12,
+    "WPA(H)": 49,
+    "WPA-IPD": 70,
+    "WPA(P)": 48,
+    "WPCR": 44,
+    "WPCRC": 43,
+    "WP.CT": 31,
+    "WPDRT": 47,
+    "WPLRT": 39,
+    "WP.ST": 32,
+    "WP.TT": 33,
+    "WP.WT": 45,
 }
 
 
@@ -64,23 +120,25 @@ def _solve_captcha_with_claude(image_bytes: bytes, api_key: str) -> str:
     msg = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=20,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png", "data": b64},
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "This is a CAPTCHA image. It contains exactly 5 alphanumeric characters "
-                        "(letters and digits). Reply with ONLY those characters, nothing else. "
-                        "No spaces, no punctuation."
-                    ),
-                },
-            ],
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "This is a CAPTCHA image. It contains exactly 5 alphanumeric characters "
+                            "(letters and digits). Reply with ONLY those characters, nothing else. "
+                            "No spaces, no punctuation."
+                        ),
+                    },
+                ],
+            }
+        ],
     )
     return msg.content[0].text.strip()
 
@@ -104,10 +162,10 @@ def _parse_result(raw: str) -> list[dict[str, Any]]:
         ref_m = re.match(r"([A-Z][A-Z0-9.()\- ]*?)\s*/\s*(\d+)\s*/\s*(\d{4})", raw_ref)
         if not ref_m:
             continue
-        case_type   = ref_m.group(1).strip()
+        case_type = ref_m.group(1).strip()
         case_number = ref_m.group(2)
-        case_year   = int(ref_m.group(3))
-        case_ref    = f"{case_type}/{case_number}/{case_year}"
+        case_year = int(ref_m.group(3))
+        case_ref = f"{case_type}/{case_number}/{case_year}"
 
         # Field 2: parties HTML  e.g. "RUPA PAUL AND ANR.<br/>Versus<br/>STATE OF WB"
         party_html = parts[2]
@@ -121,15 +179,17 @@ def _parse_result(raw: str) -> list[dict[str, Any]]:
         # Field 4: court_no (index 4 if present)
         court_no = parts[4].strip() if len(parts) > 4 else None
 
-        results.append({
-            "case_ref":    case_ref,
-            "case_type":   case_type,
-            "case_number": case_number,
-            "case_year":   case_year,
-            "petitioner":  petitioner,
-            "respondent":  respondent,
-            "court_no":    court_no or None,
-        })
+        results.append(
+            {
+                "case_ref": case_ref,
+                "case_type": case_type,
+                "case_number": case_number,
+                "case_year": case_year,
+                "petitioner": petitioner,
+                "respondent": respondent,
+                "court_no": court_no or None,
+            }
+        )
     return results
 
 
@@ -150,9 +210,9 @@ def lookup_case(case_ref: str, api_key: str) -> dict[str, Any] | None:
     if not m:
         raise ValueError(f"Invalid case ref format: {case_ref!r}")
 
-    case_type_str  = m.group(1).upper()
-    case_number    = m.group(2).lstrip("0") or m.group(2)
-    case_year      = m.group(3)
+    case_type_str = m.group(1).upper()
+    case_number = m.group(2).lstrip("0") or m.group(2)
+    case_year = m.group(3)
 
     type_id = CASE_TYPE_IDS.get(case_type_str)
     if not type_id:
@@ -186,16 +246,16 @@ def lookup_case(case_ref: str, api_key: str) -> dict[str, Any] | None:
 
         # Step 4: POST query
         payload = {
-            "action_code":      "showRecords",
-            "state_code":       "16",
-            "dist_code":        "1",
-            "court_code":       "3",
-            "case_type":        str(type_id),
-            "case_no":          case_number,
-            "rgyear":           case_year,
-            "caseNoType":       "new",
+            "action_code": "showRecords",
+            "state_code": "16",
+            "dist_code": "1",
+            "court_code": "3",
+            "case_type": str(type_id),
+            "case_no": case_number,
+            "rgyear": case_year,
+            "caseNoType": "new",
             "displayOldCaseNo": "NO",
-            "captcha":          captcha_text,
+            "captcha": captcha_text,
         }
         try:
             resp = session.post(_QRY_URL, data=payload, timeout=15)

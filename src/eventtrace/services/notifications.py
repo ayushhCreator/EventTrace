@@ -36,20 +36,26 @@ def _msg91_whatsapp_number() -> str:
 def _format_message(alert_type: str, context: dict) -> str:
     if alert_type == "serial_reached":
         return (
-            f"Court {context.get('court_no')} has reached serial "
-            f"#{context.get('current_serial')}. Your case "
-            f"{context.get('case_ref')} is at serial "
-            f"#{context.get('alert_serial')}. Cause list: {context.get('date', '')}."
+            f"⚡ Case Coming Up Soon!\n"
+            f"Court {context.get('court_no')} display board is at serial #{context.get('current_serial')}\n"
+            f"Your case {context.get('case_ref')} is at serial #{context.get('alert_serial')}\n"
+            f"Cause list date: {context.get('date', '')}"
         )
     if alert_type == "case_in_causelist":
-        return (
-            f"Your case {context.get('case_ref')} is listed for "
-            f"{context.get('date')} in Court {context.get('court_no')}, "
-            f"Serial #{context.get('serial_no')}."
-        )
+        parts = [
+            f"📋 Your case {context.get('case_ref')} is listed for {context.get('date')}",
+            f"Court {context.get('court_no')} | Section: {context.get('section', '')}",
+        ]
+        if context.get("serial_no"):
+            parts.append(f"Serial #{context.get('serial_no')}")
+        if context.get("bench_label"):
+            parts.append(f"Bench: {context.get('bench_label')}")
+        if context.get("vc_link"):
+            parts.append(f"VC Link: {context.get('vc_link')}")
+        return "\n".join(parts)
     if alert_type == "case_updated":
         summary = context.get("summary", "fields changed")
-        return f"Update detected in {context.get('case_ref')}: {summary}."
+        return f"🔔 Update detected in {context.get('case_ref')}: {summary}."
     return json.dumps(context)
 
 

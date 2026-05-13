@@ -416,6 +416,7 @@ def _start_api_thread(settings: Settings) -> None:
 
 def main() -> None:
     from ..core.logging_setup import configure_logging
+
     configure_logging()
     start_health_server()
 

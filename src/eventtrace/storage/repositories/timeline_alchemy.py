@@ -33,10 +33,15 @@ class SQLAlchemyTimelineRepository:
                 obj.hash = hash_val
                 obj.created_at = now
             else:
-                session.add(CaseSnapshot(
-                    case_ref=case_ref, list_date=list_date,
-                    data_json=data_json, hash=hash_val, created_at=now,
-                ))
+                session.add(
+                    CaseSnapshot(
+                        case_ref=case_ref,
+                        list_date=list_date,
+                        data_json=data_json,
+                        hash=hash_val,
+                        created_at=now,
+                    )
+                )
             session.commit()
         return True
 
@@ -51,8 +56,12 @@ class SQLAlchemyTimelineRepository:
             if not obj:
                 return None
             return {
-                "id": obj.id, "case_ref": obj.case_ref, "list_date": obj.list_date,
-                "data_json": obj.data_json, "hash": obj.hash, "created_at": obj.created_at,
+                "id": obj.id,
+                "case_ref": obj.case_ref,
+                "list_date": obj.list_date,
+                "data_json": obj.data_json,
+                "hash": obj.hash,
+                "created_at": obj.created_at,
             }
 
     def insert_timeline_event(
@@ -64,14 +73,16 @@ class SQLAlchemyTimelineRepository:
         change_summary: str | None = None,
     ) -> None:
         with Session(self._engine) as session:
-            session.add(CaseTimelineEvent(
-                user_id=user_id,
-                case_ref=case_ref,
-                event_type=event_type,
-                event_date=event_date,
-                change_summary=change_summary,
-                created_at=iso(utc_now()),
-            ))
+            session.add(
+                CaseTimelineEvent(
+                    user_id=user_id,
+                    case_ref=case_ref,
+                    event_type=event_type,
+                    event_date=event_date,
+                    change_summary=change_summary,
+                    created_at=iso(utc_now()),
+                )
+            )
             session.commit()
 
     def get_timeline(self, user_id: str, case_ref: str, limit: int = 50) -> list[dict]:
@@ -84,25 +95,31 @@ class SQLAlchemyTimelineRepository:
             ).all()
         return [
             {
-                "id": r.id, "user_id": r.user_id, "case_ref": r.case_ref,
-                "event_type": r.event_type, "event_date": r.event_date,
-                "change_summary": r.change_summary, "created_at": r.created_at,
+                "id": r.id,
+                "user_id": r.user_id,
+                "case_ref": r.case_ref,
+                "event_type": r.event_type,
+                "event_date": r.event_date,
+                "change_summary": r.change_summary,
+                "created_at": r.created_at,
             }
             for r in rows
         ]
 
     def get_all_tracked_case_refs(self) -> list[str]:
         with Session(self._engine) as session:
-            rows = session.execute(
-                select(TrackedCase.case_ref).distinct()
-            ).scalars().all()
+            rows = session.execute(select(TrackedCase.case_ref).distinct()).scalars().all()
         return list(rows)
 
     def get_users_tracking(self, case_ref: str) -> list[str]:
         with Session(self._engine) as session:
-            rows = session.execute(
-                select(TrackedCase.user_id).distinct().where(TrackedCase.case_ref == case_ref)
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(TrackedCase.user_id).distinct().where(TrackedCase.case_ref == case_ref)
+                )
+                .scalars()
+                .all()
+            )
         return list(rows)
 
     def has_causelist_alert_today(self, user_id: str, case_ref: str, event_date: str) -> bool:

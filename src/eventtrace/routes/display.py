@@ -105,27 +105,29 @@ def display_board(
         else:
             status = "WAITING"
 
-        results.append({
-            "court_no": court_no,
-            "side": bench.get("side", "APPELLATE SIDE"),
-            "list_type": bench.get("list_type", "DAILY"),
-            "judges": judges,
-            "bench_label": bench.get("bench_label"),
-            "not_sitting": bool(bench.get("not_sitting")),
-            "vc_link": vc_links.get(court_no) or bench.get("vc_link"),
-            "at_time": bench.get("at_time"),
-            "floor": bench.get("floor"),
-            "building": bench.get("building"),
-            "commercial": live_data.get("commercial") == "C",
-            "status": status,
-            "serial_no": live_data.get("cause_list_sr_no"),
-            "case_no": live_data.get("case_no_string"),
-            "message": live_data.get("message"),
-            "pass_over": live_data.get("pass_over"),
-            "hearing_last_modified": live_data.get("hearing_last_modified"),
-            "duration_start": serial_starts.get(court_id) or serial_starts.get(court_no),
-            "court_id": court_id,
-        })
+        results.append(
+            {
+                "court_no": court_no,
+                "side": bench.get("side", "APPELLATE SIDE"),
+                "list_type": bench.get("list_type", "DAILY"),
+                "judges": judges,
+                "bench_label": bench.get("bench_label"),
+                "not_sitting": bool(bench.get("not_sitting")),
+                "vc_link": vc_links.get(court_no) or bench.get("vc_link"),
+                "at_time": bench.get("at_time"),
+                "floor": bench.get("floor"),
+                "building": bench.get("building"),
+                "commercial": live_data.get("commercial") == "C",
+                "status": status,
+                "serial_no": live_data.get("cause_list_sr_no"),
+                "case_no": live_data.get("case_no_string"),
+                "message": live_data.get("message"),
+                "pass_over": live_data.get("pass_over"),
+                "hearing_last_modified": live_data.get("hearing_last_modified"),
+                "duration_start": serial_starts.get(court_id) or serial_starts.get(court_no),
+                "court_id": court_id,
+            }
+        )
 
     # Courts in live but not in cause list (cause list not yet scraped for today)
     for room_no, live_entry in live.items():
@@ -135,27 +137,29 @@ def display_board(
         if live_data.get("hearing_date") and live_data["hearing_date"] != target:
             continue
         court_id = live_entry.get("court_id", room_no)
-        results.append({
-            "court_no": room_no,
-            "side": live_data.get("side", ""),
-            "list_type": live_data.get("cause_list_type_name", "DAILY"),
-            "judges": [live_data["judge_names"]] if live_data.get("judge_names") else [],
-            "bench_label": None,
-            "not_sitting": False,
-            "vc_link": vc_links.get(room_no) or live_data.get("vc_link"),
-            "at_time": None,
-            "floor": None,
-            "building": None,
-            "commercial": live_data.get("commercial") == "C",
-            "status": "DONE" if court_id in absent else "LIVE",
-            "serial_no": live_data.get("cause_list_sr_no"),
-            "case_no": live_data.get("case_no_string"),
-            "message": live_data.get("message"),
-            "pass_over": live_data.get("pass_over"),
-            "hearing_last_modified": live_data.get("hearing_last_modified"),
-            "duration_start": serial_starts.get(court_id) or serial_starts.get(room_no),
-            "court_id": court_id,
-        })
+        results.append(
+            {
+                "court_no": room_no,
+                "side": live_data.get("side", ""),
+                "list_type": live_data.get("cause_list_type_name", "DAILY"),
+                "judges": [live_data["judge_names"]] if live_data.get("judge_names") else [],
+                "bench_label": None,
+                "not_sitting": False,
+                "vc_link": vc_links.get(room_no) or live_data.get("vc_link"),
+                "at_time": None,
+                "floor": None,
+                "building": None,
+                "commercial": live_data.get("commercial") == "C",
+                "status": "DONE" if court_id in absent else "LIVE",
+                "serial_no": live_data.get("cause_list_sr_no"),
+                "case_no": live_data.get("case_no_string"),
+                "message": live_data.get("message"),
+                "pass_over": live_data.get("pass_over"),
+                "hearing_last_modified": live_data.get("hearing_last_modified"),
+                "duration_start": serial_starts.get(court_id) or serial_starts.get(room_no),
+                "court_id": court_id,
+            }
+        )
 
     def _sort_key(x: dict) -> int:
         try:

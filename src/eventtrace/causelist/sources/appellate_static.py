@@ -35,8 +35,10 @@ class AppellateStaticSource(CauseListSource):
             courts = parse_causelist(html, for_date)
             # Stamp side/list_type on every bench (parser may already set these)
             for court in courts:
-                court["bench"].setdefault("side", self.side)
-                court["bench"].setdefault("list_type", self.list_type)
+                # Force-set side/list_type — these derive from the URL path
+                # (/AS/ = APPELLATE SIDE) and are more reliable than HTML text.
+                court["bench"]["side"] = self.side
+                court["bench"]["list_type"] = self.list_type
                 court["bench"]["source_id"] = self.source_id
             return SourceResult(
                 source_id=self.source_id,

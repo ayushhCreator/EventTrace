@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import structlog
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import create_engine
@@ -245,6 +246,12 @@ class DB:
                   serial_no    INTEGER,
                   petitioner   TEXT,
                   respondent   TEXT,
+                                    cino         TEXT,
+                                    case_type_id TEXT,
+                                    state_cd     TEXT,
+                                    court_code   TEXT,
+                                    case_no      TEXT,
+                                    case_year    TEXT,
                   alert_active INTEGER NOT NULL DEFAULT 0,
                   alert_serial INTEGER,
                   look_ahead   INTEGER NOT NULL DEFAULT 5,
@@ -253,6 +260,24 @@ class DB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref);
+                """
+            )
+
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS case_history_cache (
+                    cino         TEXT NOT NULL,
+                    state_cd     TEXT NOT NULL,
+                    court_code   TEXT NOT NULL,
+                    case_type_id TEXT,
+                    case_no      TEXT,
+                    case_year    TEXT,
+                    data_json    TEXT NOT NULL,
+                    fetched_at   TEXT NOT NULL,
+                    PRIMARY KEY (cino, state_cd, court_code)
+                );
+                CREATE INDEX IF NOT EXISTS idx_case_history_cache_fetched
+                    ON case_history_cache(fetched_at DESC);
                 """
             )
 
@@ -310,6 +335,12 @@ class DB:
                 "ALTER TABLE subscriptions ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0",
                 # tracked_cases: serial-alert deduplication
                 "ALTER TABLE tracked_cases ADD COLUMN alerted_at TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN cino TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN case_type_id TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN state_cd TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN court_code TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN case_no TEXT",
+                "ALTER TABLE tracked_cases ADD COLUMN case_year TEXT",
                 # users: notification preferences + email verification
                 "ALTER TABLE users ADD COLUMN notification_prefs TEXT",
                 "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0",
@@ -625,19 +656,35 @@ class DB:
     # ── Causelist delegation ─────────────────────────────────────────────────
 
     def get_causelist_bench(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> dict[str, Any] | None:
         return self._causelist.get_causelist_bench(
             list_date, court_no, side=side, list_type=list_type, source_id=source_id
         )
 
     def list_causelist_benches(
-        self, list_date: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self._causelist.list_causelist_benches(list_date, side=side, list_type=list_type, source_id=source_id)
+        return self._causelist.list_causelist_benches(
+            list_date, side=side, list_type=list_type, source_id=source_id
+        )
 
     def list_causelist_cases(
-        self, list_date: str, court_no: str, side: str | None = None, list_type: str | None = None, source_id: str | None = None
+        self,
+        list_date: str,
+        court_no: str,
+        side: str | None = None,
+        list_type: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self._causelist.list_causelist_cases(
             list_date, court_no, side=side, list_type=list_type, source_id=source_id
@@ -712,8 +759,25 @@ class DB:
     def mark_otp_used(self, otp_id: int) -> None:
         return self._auth.mark_otp_used(otp_id)
 
-    def update_user_profile(self, user_id: str, name: str | None, email: str | None, role: str | None = None, bar_enrollment_number: str | None = None, firm_name: str | None = None, secondary_email: str | None = None) -> dict | None:
-        return self._auth.update_user_profile(user_id, name=name, email=email, role=role, bar_enrollment_number=bar_enrollment_number, firm_name=firm_name, secondary_email=secondary_email)
+    def update_user_profile(
+        self,
+        user_id: str,
+        name: str | None,
+        email: str | None,
+        role: str | None = None,
+        bar_enrollment_number: str | None = None,
+        firm_name: str | None = None,
+        secondary_email: str | None = None,
+    ) -> dict | None:
+        return self._auth.update_user_profile(
+            user_id,
+            name=name,
+            email=email,
+            role=role,
+            bar_enrollment_number=bar_enrollment_number,
+            firm_name=firm_name,
+            secondary_email=secondary_email,
+        )
 
     def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at) -> None:
         return self._auth.save_email_otp(email, user_id, otp_hash, expires_at)
@@ -741,9 +805,11 @@ class DB:
             con.execute(
                 """
                 INSERT INTO tracked_cases
-                  (user_id, case_ref, court_no, bench_label, judges_json,
-                   list_date, serial_no, petitioner, respondent, added_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (user_id, case_ref, court_no, bench_label, judges_json,
+                                     list_date, serial_no, petitioner, respondent,
+                                     cino, case_type_id, state_cd, court_code, case_no, case_year,
+                                     added_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, case_ref) DO UPDATE SET
                   court_no    = excluded.court_no,
                   bench_label = excluded.bench_label,
@@ -751,7 +817,13 @@ class DB:
                   list_date   = excluded.list_date,
                   serial_no   = excluded.serial_no,
                   petitioner  = excluded.petitioner,
-                  respondent  = excluded.respondent
+                                    respondent  = excluded.respondent,
+                                    cino        = excluded.cino,
+                                    case_type_id = excluded.case_type_id,
+                                    state_cd    = excluded.state_cd,
+                                    court_code  = excluded.court_code,
+                                    case_no     = excluded.case_no,
+                                    case_year   = excluded.case_year
                 """,
                 (
                     user_id,
@@ -763,6 +835,12 @@ class DB:
                     kwargs.get("serial_no"),
                     kwargs.get("petitioner"),
                     kwargs.get("respondent"),
+                                        kwargs.get("cino"),
+                                        kwargs.get("case_type_id"),
+                                        kwargs.get("state_cd"),
+                                        kwargs.get("court_code"),
+                                        kwargs.get("case_no"),
+                                        kwargs.get("case_year"),
                     now,
                 ),
             )
@@ -797,6 +875,87 @@ class DB:
                 (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def list_tracked_cases_for_refresh(self, limit: int | None = None) -> list[dict]:
+        sql = (
+            "SELECT * FROM tracked_cases "
+            "WHERE cino IS NOT NULL AND cino <> '' "
+            "AND case_type_id IS NOT NULL AND case_type_id <> '' "
+            "AND state_cd IS NOT NULL AND state_cd <> '' "
+            "AND court_code IS NOT NULL AND court_code <> '' "
+            "AND case_no IS NOT NULL AND case_no <> '' "
+            "AND case_year IS NOT NULL AND case_year <> '' "
+            "ORDER BY added_at DESC"
+        )
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        with self.connect() as con:
+            rows = con.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_case_history_cache(
+        self,
+        cino: str,
+        state_cd: str,
+        court_code: str,
+        max_age_seconds: int | None = None,
+    ) -> dict | None:
+        with self.connect() as con:
+            row = con.execute(
+                """
+                SELECT data_json, fetched_at
+                FROM case_history_cache
+                WHERE cino=? AND state_cd=? AND court_code=?
+                """,
+                (cino, state_cd, court_code),
+            ).fetchone()
+            if not row:
+                return None
+            fetched_at = row["fetched_at"]
+            if max_age_seconds is not None:
+                try:
+                    ts = datetime.fromisoformat(fetched_at)
+                    if datetime.utcnow() - ts > timedelta(seconds=max_age_seconds):
+                        return None
+                except Exception:
+                    return None
+            try:
+                data = json.loads(row["data_json"])
+            except Exception:
+                return None
+            data["cached"] = True
+            data["cached_at"] = fetched_at
+            return data
+
+    def set_case_history_cache(
+        self,
+        cino: str,
+        state_cd: str,
+        court_code: str,
+        case_type_id: str | None,
+        case_no: str | None,
+        case_year: str | None,
+        data: dict,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        payload = json.dumps(data, ensure_ascii=False)
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO case_history_cache
+                  (cino, state_cd, court_code, case_type_id, case_no, case_year, data_json, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cino, state_cd, court_code) DO UPDATE SET
+                  case_type_id=excluded.case_type_id,
+                  case_no=excluded.case_no,
+                  case_year=excluded.case_year,
+                  data_json=excluded.data_json,
+                  fetched_at=excluded.fetched_at
+                """,
+                (cino, state_cd, court_code, case_type_id, case_no, case_year, payload, now),
+            )
 
     def get_tracked_case(self, user_id: str, case_ref: str) -> dict | None:
         with self.connect() as con:
