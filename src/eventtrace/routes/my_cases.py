@@ -168,6 +168,22 @@ def get_case_timeline(
                 pass
         events.append(row)
 
+    # De-duplicate events that are identical in meaning (same type/date/summary).
+    # Some flows can insert duplicates (e.g. repeated "TRACK_STARTED" on retries).
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for ev in events:
+        try:
+            summary_key = json.dumps(ev.get("change_summary"), sort_keys=True, ensure_ascii=False)
+        except Exception:
+            summary_key = str(ev.get("change_summary"))
+        key = f"{ev.get('event_type','')}|{ev.get('event_date','')}|{summary_key}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(ev)
+    events = deduped
+
     # Compute stats
     appeared = sum(1 for e in events if e["event_type"] in ("NO_CHANGE", "UPDATED"))
     changes = sum(1 for e in events if e["event_type"] == "UPDATED")
