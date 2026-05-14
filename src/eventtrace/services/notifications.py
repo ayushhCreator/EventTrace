@@ -134,6 +134,41 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
         return False
 
 
+def send_msg91_session_message(phone: str, text: str, auth_key: str) -> bool:
+    """Send a free-form session message (within 24h of user's inbound message)."""
+    wa_number = _msg91_whatsapp_number()
+    if not wa_number:
+        log.warning("MSG91_WHATSAPP_NUMBER not set — skipping session message")
+        return False
+    try:
+        import httpx
+
+        mobile = phone.lstrip("+")
+        resp = httpx.post(
+            "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
+            headers={"authkey": auth_key, "Content-Type": "application/json"},
+            json={
+                "integrated_number": wa_number,
+                "content_type": "text",
+                "payload": {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": mobile,
+                    "type": "text",
+                    "text": {"body": text},
+                },
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            log.warning("MSG91 session msg error %s: %s", resp.status_code, resp.text[:200])
+            return False
+        return True
+    except Exception as exc:
+        log.warning("MSG91 session msg failed: %s", exc)
+        return False
+
+
 # ── Email delivery (Resend) ───────────────────────────────────────────────────
 
 

@@ -114,6 +114,48 @@ _MSG91_STATUS_MAP = {
 }
 
 
+@router.post("/webhook/msg91/inbound")
+async def msg91_inbound_webhook(
+    request: Request,
+    db: Any = Depends(get_db),
+) -> dict:
+    """MSG91 fires this when a user sends a WhatsApp message to the business number."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    # MSG91 inbound payload: {"from": "917464026177", "message": "Hi", "type": "text", ...}
+    sender = (payload.get("from") or payload.get("sender") or "").strip()
+    if not sender:
+        return {"ok": True}
+
+    phone = "+" + sender.lstrip("+")
+    user = db.get_user_by_phone(phone)
+
+    from ..services.notifications import send_msg91_session_message, _msg91_whatsapp_key
+    auth_key = _msg91_whatsapp_key()
+
+    if user:
+        db.set_whatsapp_verified(str(user["id"]), phone)
+        name = user.get("name") or "there"
+        msg = (
+            f"Hi {name}! \U0001f44b Your WhatsApp alerts are now active on SuperSahayak Legal.\n\n"
+            "You'll receive alerts when your cases appear in the cause list or display board.\n\n"
+            "Reply HELP to see available commands."
+        )
+    else:
+        msg = (
+            "Hi! SuperSahayak Legal helps advocates track High Court cases in real time.\n\n"
+            "Create your account at supersahayak.in to get case alerts on WhatsApp."
+        )
+
+    if auth_key:
+        send_msg91_session_message(phone, msg, auth_key)
+
+    return {"ok": True}
+
+
 @router.post("/webhook/msg91/delivery")
 async def msg91_delivery_webhook(
     request: Request,
