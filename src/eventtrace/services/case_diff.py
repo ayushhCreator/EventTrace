@@ -23,7 +23,6 @@ _SNAPSHOT_FIELDS = [
     "section",
     "subsection",
     "hearing_type",
-    "raw_text",
     "court_no",
 ]
 

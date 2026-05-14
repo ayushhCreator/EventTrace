@@ -82,7 +82,7 @@ steps:
           --min-instances 0 \
           --max-instances 5 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_TEMPLATE_ID=MSG91_TEMPLATE_ID:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_TEMPLATE_ID=MSG91_TEMPLATE_ID:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESEND_FROM_EMAIL=RESEND_FROM_EMAIL:latest \
           --set-env-vars CHD_API_HOST=0.0.0.0,CHD_API_PORT=8080 \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
@@ -100,10 +100,12 @@ steps:
           --platform managed \
           --no-allow-unauthenticated \
           --command scripts/start-monitor.sh \
+          --port 8080 \
           --min-instances 1 \
           --max-instances 1 \
+          --timeout 300 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
 
@@ -120,10 +122,12 @@ steps:
           --platform managed \
           --no-allow-unauthenticated \
           --command scripts/start-scheduler.sh \
+          --port 8080 \
           --min-instances 1 \
           --max-instances 1 \
+          --timeout 300 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
 

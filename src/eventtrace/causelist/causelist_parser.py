@@ -652,7 +652,7 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
                 "section": cat,
                 "subsection": current_subsection,
                 "hearing_type": h_type,
-                "raw_text": "\n".join(raw_lines),
+                # raw_text intentionally omitted — debug data, ~60% of row size
                 # Gap 4
                 "canonical_section": canonical_section,
                 "group_no": group_no,
