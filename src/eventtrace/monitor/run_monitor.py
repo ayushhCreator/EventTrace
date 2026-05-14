@@ -466,25 +466,34 @@ def main() -> None:
     notify_thread.start()
     log.info("Notification retry worker started")
 
-    # Start causelist daily scheduler in background
-    # (scrapes next working day's cause list at 20:30/21:00/21:30/22:00 IST)
+    # Start causelist daily scheduler in background.
+    # Set CHD_EMBED_CAUSELIST_SCHEDULER=0 when running alongside a dedicated
+    # supersahayak-scheduler service (production) to avoid duplicate scraping.
     from ..causelist.causelist_scheduler import run_scheduler as _run_causelist_scheduler
 
-    causelist_sched_thread = threading.Thread(
-        target=_run_causelist_scheduler,
-        args=(settings, db),
-        daemon=True,
-        name="causelist-scheduler",
-    )
-    causelist_sched_thread.start()
-    log.info("Causelist daily scheduler started")
+    _embed_sched = os.getenv("CHD_EMBED_CAUSELIST_SCHEDULER", "1").strip() in {"1", "true", "yes"}
+    if _embed_sched:
+        causelist_sched_thread = threading.Thread(
+            target=_run_causelist_scheduler,
+            args=(settings, db),
+            daemon=True,
+            name="causelist-scheduler",
+        )
+        causelist_sched_thread.start()
+        log.info("Causelist daily scheduler started (embedded)")
+    else:
+        causelist_sched_thread = None
+        log.info("Causelist daily scheduler disabled (CHD_EMBED_CAUSELIST_SCHEDULER=0)")
 
     # Thread watchdog — restarts any worker thread that dies unexpectedly
     _worker_specs: list[tuple[str, threading.Thread, Any]] = [
         ("vc-scheduler", vc_thread, (_vc_scheduler_thread, (settings, db))),
         ("notify-retry", notify_thread, (run_retry_worker, (db,))),
-        ("causelist-scheduler", causelist_sched_thread, (_run_causelist_scheduler, (settings, db))),
     ]
+    if causelist_sched_thread is not None:
+        _worker_specs.append(
+            ("causelist-scheduler", causelist_sched_thread, (_run_causelist_scheduler, (settings, db)))
+        )
 
     def _watchdog() -> None:
         while True:
