@@ -408,6 +408,9 @@ class PostgresDB:
     def get_user_stats(self) -> dict:
         return self._auth.get_user_stats()
 
+    def list_all_users_with_stats(self) -> list[dict]:
+        return self._auth.list_all_users_with_stats()
+
     def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
         return self._auth.save_refresh_token(user_id, token_hash, expires_at)
 

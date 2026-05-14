@@ -413,3 +413,41 @@ class SQLAlchemyAuthRepository:
             "with_phone": with_phone,
             "admins": admins,
         }
+
+    def list_all_users_with_stats(self) -> list[dict]:
+        from sqlalchemy import text
+
+        sql = text("""
+            SELECT
+                u.id,
+                u.phone,
+                u.name,
+                u.email,
+                u.role,
+                u.tier,
+                u.verified,
+                u.whatsapp_verified,
+                u.whatsapp_number,
+                u.is_admin,
+                u.created_at,
+                u.bar_enrollment_number,
+                u.firm_name,
+                COALESCE(tc.case_count, 0) AS tracked_cases,
+                COALESCE(al.alert_count, 0) AS active_alerts
+            FROM users u
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) AS case_count
+                FROM tracked_cases
+                GROUP BY user_id
+            ) tc ON tc.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) AS alert_count
+                FROM tracked_cases
+                WHERE alert_serial IS NOT NULL
+                GROUP BY user_id
+            ) al ON al.user_id = u.id
+            ORDER BY u.created_at DESC
+        """)
+        with Session(self._engine) as session:
+            rows = session.execute(sql).fetchall()
+        return [dict(r._mapping) for r in rows]
