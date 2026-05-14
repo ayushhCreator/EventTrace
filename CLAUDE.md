@@ -25,15 +25,16 @@ python -m playwright install
 
 | Task | Command |
 |------|---------|
-| Start monitor loop | `chd-run-monitor` |
+| Start monitor (includes causelist scheduler, VC, notifications) | `chd-run-monitor` |
 | Start API | `chd-api` |
-| Start causelist scheduler | `chd-schedule-causelist` |
+| Start causelist scheduler standalone | `chd-schedule-causelist` |
 | Init session (only if JSON stops working) | `chd-init-session` |
 | Scrape causelist (one-shot) | `chd-scrape-causelist YYYY-MM-DD --store` |
 | Lint | `ruff check src/` |
 | Format | `ruff format src/` |
 
-Run all three together locally (3 terminals): `chd-api` + `chd-run-monitor` + `chd-schedule-causelist`.
+Run locally (2 terminals): `chd-api` + `chd-run-monitor`.
+`chd-run-monitor` now embeds: display board poller + causelist scheduler + VC scraper + notification retry + thread watchdog.
 
 API runs at `http://127.0.0.1:8009` by default. Override with `CHD_API_HOST` / `CHD_API_PORT`.
 Legacy embedded UI at `http://127.0.0.1:8009/ui` (do NOT edit unless explicitly told).
@@ -78,13 +79,16 @@ Two DB backends, same code:
 
 `get_db(settings)` in `db.py` picks the right one. All five processes use `get_db()`.
 
-Four independent processes share the DB:
+Two processes share the DB:
 
 ```
-init_session          →  .state/storage_state.json   (one-time manual CAPTCHA)
-run_monitor           →  scraper → change_detector → DB  (poll loop, ~15s)
-schedule_causelist    →  causelist PDF → causelist_case/bench tables (daily, 20:30–22:00 IST)
-api                   →  DB reads only (FastAPI, read-only)
+init_session   →  .state/storage_state.json   (one-time manual CAPTCHA)
+api            →  DB reads only (FastAPI, read-only)
+run_monitor    →  main thread:   scraper → change_detector → DB  (poll loop, ~15s)
+                  thread:        causelist scheduler (scrapes next day at 20:30–22:00 IST)
+                  thread:        VC links scraper (windows 0h/6h/8h/20h IST)
+                  thread:        notification retry worker
+                  thread:        watchdog (restarts dead worker threads every 30s)
 ```
 
 **Data flow in the monitor loop** (`run_monitor.py`):

@@ -466,6 +466,40 @@ def main() -> None:
     notify_thread.start()
     log.info("Notification retry worker started")
 
+    # Start causelist daily scheduler in background
+    # (scrapes next working day's cause list at 20:30/21:00/21:30/22:00 IST)
+    from ..causelist.causelist_scheduler import run_scheduler as _run_causelist_scheduler
+
+    causelist_sched_thread = threading.Thread(
+        target=_run_causelist_scheduler,
+        args=(settings, db),
+        daemon=True,
+        name="causelist-scheduler",
+    )
+    causelist_sched_thread.start()
+    log.info("Causelist daily scheduler started")
+
+    # Thread watchdog — restarts any worker thread that dies unexpectedly
+    _worker_specs: list[tuple[str, threading.Thread, Any]] = [
+        ("vc-scheduler", vc_thread, (_vc_scheduler_thread, (settings, db))),
+        ("notify-retry", notify_thread, (run_retry_worker, (db,))),
+        ("causelist-scheduler", causelist_sched_thread, (_run_causelist_scheduler, (settings, db))),
+    ]
+
+    def _watchdog() -> None:
+        while True:
+            time.sleep(30)
+            for i, (name, thread, (target, args)) in enumerate(_worker_specs):
+                if not thread.is_alive():
+                    log.error("Thread %s died — restarting", name)
+                    new_thread = threading.Thread(target=target, args=args, daemon=True, name=name)
+                    new_thread.start()
+                    _worker_specs[i] = (name, new_thread, (target, args))
+                    log.info("Thread %s restarted", name)
+
+    threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
+    log.info("Thread watchdog started")
+
     consecutive_failures = 0
 
     while True:
