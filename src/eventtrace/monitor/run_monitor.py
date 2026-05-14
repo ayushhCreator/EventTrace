@@ -509,9 +509,47 @@ def main() -> None:
     threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
     log.info("Thread watchdog started")
 
+    # Court session hours (IST): Mon–Fri 09:45–18:00
+    # Outside these hours the display board is blank — no point polling.
+    _COURT_START = (9, 45)   # (hour, minute) IST
+    _COURT_END   = (18, 0)
+
+    def _seconds_until_court_open() -> float:
+        now = ist_now()
+        if now.weekday() >= 5:  # weekend
+            days_until_mon = 7 - now.weekday()
+            next_open = now.replace(hour=_COURT_START[0], minute=_COURT_START[1], second=0, microsecond=0)
+            next_open = next_open + timedelta(days=days_until_mon)
+        else:
+            next_open = now.replace(hour=_COURT_START[0], minute=_COURT_START[1], second=0, microsecond=0)
+            if now >= next_open.replace(hour=_COURT_END[0], minute=_COURT_END[1]):
+                # after close today → next Monday or tomorrow (skip weekend)
+                delta = 1
+                while (now + timedelta(days=delta)).weekday() >= 5:
+                    delta += 1
+                next_open = next_open + timedelta(days=delta)
+        return max(0.0, (next_open - now).total_seconds())
+
+    def _is_court_hours() -> bool:
+        now = ist_now()
+        if now.weekday() >= 5:
+            return False
+        t = (now.hour, now.minute)
+        return _COURT_START <= t <= _COURT_END
+
     consecutive_failures = 0
 
     while True:
+        if not _is_court_hours():
+            secs = _seconds_until_court_open()
+            hrs = secs / 3600
+            log.info("Outside court hours — sleeping %.1fh until next session", hrs)
+            db.set_monitor_state("board_active", "0")
+            db.set_monitor_state("court_session", "closed")
+            time.sleep(min(secs, 1800))  # wake at most every 30 min to recheck
+            continue
+
+        db.set_monitor_state("court_session", "open")
         observed = utc_now()
         try:
             rows = scrape_table_once_sync(settings)

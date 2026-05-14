@@ -91,6 +91,19 @@ def _case_refs_for_serials(
     return ordered
 
 
+@router.get("/board-status")
+def board_status(db: Any = Depends(get_db)) -> dict:
+    """Public endpoint: tells the UI whether the court is in session."""
+    court_session = db.get_monitor_state("court_session") or "unknown"
+    last_poll = db.get_monitor_state("last_successful_poll")
+    board_active = db.get_monitor_state("board_active")
+    return {
+        "court_session": court_session,   # "open" | "closed" | "unknown"
+        "last_successful_poll": last_poll,
+        "board_active": board_active == "1",
+    }
+
+
 @router.get("/current-state")
 def current_state(db: Any = Depends(get_db)) -> list[dict]:
     return db.list_current_state()

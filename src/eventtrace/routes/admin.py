@@ -57,6 +57,7 @@ def system_health(
 ) -> dict:
     last_poll = db.get_monitor_state("last_successful_poll")
     board_active = db.get_monitor_state("board_active")
+    court_session = db.get_monitor_state("court_session") or "unknown"
 
     try:
         current_state = db.list_current_state()
@@ -78,6 +79,7 @@ def system_health(
         "monitor": {
             "last_successful_poll": last_poll,
             "board_active": board_active == "1",
+            "court_session": court_session,
             "active_courts": active_courts,
         },
         "causelist": {
