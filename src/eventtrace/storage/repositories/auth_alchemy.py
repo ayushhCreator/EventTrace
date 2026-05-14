@@ -10,18 +10,21 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from ...common.time import iso, utc_now
-from ..models import EmailOtp, PhoneOtp, RefreshToken, User
+from ..models import EmailOtp, PhoneOtp, RefreshToken, User, WhatsappOtp
 
 
 def _user_to_dict(user: User) -> dict:
     return {
         "id": str(user.id),
         "phone": user.phone,
+        "whatsapp_number": getattr(user, "whatsapp_number", None),
+        "whatsapp_verified": bool(getattr(user, "whatsapp_verified", 0)),
+        "daily_wa_cap": getattr(user, "daily_wa_cap", 20),
         "email": user.email,
         "email_verified": bool(user.email_verified),
         "name": user.name,
@@ -33,6 +36,18 @@ def _user_to_dict(user: User) -> dict:
         "firm_name": user.firm_name,
         "secondary_email": user.secondary_email,
         "is_admin": bool(user.is_admin),
+    }
+
+
+def _whatsapp_otp_to_dict(otp: WhatsappOtp) -> dict:
+    return {
+        "id": otp.id,
+        "whatsapp_number": otp.whatsapp_number,
+        "user_id": otp.user_id,
+        "otp_hash": otp.otp_hash,
+        "expires_at": otp.expires_at,
+        "attempts": otp.attempts,
+        "used": otp.used,
     }
 
 
@@ -82,7 +97,13 @@ class SQLAlchemyAuthRepository:
             user = session.get(User, user_id)
             return _user_to_dict(user) if user else None
 
-    def upsert_user(self, phone: str, name: str | None = None, email: str | None = None) -> dict:
+    def upsert_user(
+        self,
+        phone: str,
+        name: str | None = None,
+        email: str | None = None,
+        whatsapp_number: str | None = None,
+    ) -> dict:
         with Session(self._engine) as session:
             user = session.scalar(select(User).where(User.phone == phone))
             if user:
@@ -90,10 +111,13 @@ class SQLAlchemyAuthRepository:
                     user.name = name
                 if email and not user.email:
                     user.email = email
+                if whatsapp_number and not getattr(user, "whatsapp_number", None):
+                    user.whatsapp_number = whatsapp_number
             else:
                 user = User(
                     id=str(uuid.uuid4()),
                     phone=phone,
+                    whatsapp_number=whatsapp_number or phone,
                     name=name,
                     email=email,
                     verified=0,
@@ -154,6 +178,7 @@ class SQLAlchemyAuthRepository:
         user_id: str,
         name: str | None = None,
         email: str | None = None,
+        whatsapp_number: str | None = None,
         role: str | None = None,
         bar_enrollment_number: str | None = None,
         firm_name: str | None = None,
@@ -167,6 +192,8 @@ class SQLAlchemyAuthRepository:
                 user.name = name
             if email is not None:
                 user.email = email
+            if whatsapp_number is not None:
+                user.whatsapp_number = whatsapp_number
             if role is not None:
                 user.role = role
             if bar_enrollment_number is not None:
@@ -303,3 +330,86 @@ class SQLAlchemyAuthRepository:
             session.commit()
             session.refresh(user)
             return _user_to_dict(user)
+
+    # ── WhatsApp OTP ──────────────────────────────────────────────────────────
+
+    def save_whatsapp_otp(self, whatsapp_number: str, user_id: str, otp_hash: str, expires_at: Any) -> None:
+        now = iso(utc_now())
+        if not isinstance(expires_at, str):
+            expires_at = iso(expires_at)
+        with Session(self._engine) as session:
+            otp = WhatsappOtp(
+                whatsapp_number=whatsapp_number,
+                user_id=user_id,
+                otp_hash=otp_hash,
+                expires_at=expires_at,
+                attempts=0,
+                used=0,
+                created_at=now,
+            )
+            session.add(otp)
+            session.commit()
+
+    def get_latest_whatsapp_otp(self, whatsapp_number: str) -> dict | None:
+        with Session(self._engine) as session:
+            otp = session.scalar(
+                select(WhatsappOtp)
+                .where(WhatsappOtp.whatsapp_number == whatsapp_number, WhatsappOtp.used == 0)
+                .order_by(WhatsappOtp.id.desc())
+                .limit(1)
+            )
+            return _whatsapp_otp_to_dict(otp) if otp else None
+
+    def get_latest_whatsapp_otp_for_user(self, user_id: str) -> dict | None:
+        with Session(self._engine) as session:
+            otp = session.scalar(
+                select(WhatsappOtp)
+                .where(WhatsappOtp.user_id == user_id, WhatsappOtp.used == 0)
+                .order_by(WhatsappOtp.id.desc())
+                .limit(1)
+            )
+            return _whatsapp_otp_to_dict(otp) if otp else None
+
+    def increment_whatsapp_otp_attempts(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(WhatsappOtp, otp_id)
+            if otp:
+                otp.attempts += 1
+                session.commit()
+
+    def mark_whatsapp_otp_used(self, otp_id: int) -> None:
+        with Session(self._engine) as session:
+            otp = session.get(WhatsappOtp, otp_id)
+            if otp:
+                otp.used = 1
+                session.commit()
+
+    def set_whatsapp_verified(self, user_id: str, whatsapp_number: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if not user:
+                return None
+            user.whatsapp_number = whatsapp_number
+            user.whatsapp_verified = 1
+            session.commit()
+            session.refresh(user)
+            return _user_to_dict(user)
+
+    def get_user_stats(self) -> dict:
+        with Session(self._engine) as session:
+            total = session.scalar(select(func.count()).select_from(User)) or 0
+            wa_verified = session.scalar(
+                select(func.count()).select_from(User).where(User.whatsapp_verified == 1)
+            ) or 0
+            with_phone = session.scalar(
+                select(func.count()).select_from(User).where(User.phone.isnot(None))
+            ) or 0
+            admins = session.scalar(
+                select(func.count()).select_from(User).where(User.is_admin == 1)
+            ) or 0
+        return {
+            "total_users": total,
+            "whatsapp_verified": wa_verified,
+            "with_phone": with_phone,
+            "admins": admins,
+        }

@@ -88,7 +88,7 @@ def send_otp(
     otp_hash = auth_svc.hash_otp(otp, settings.otp_hmac_secret)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=auth_svc.OTP_EXPIRE_MINUTES)
 
-    db.upsert_user(phone, name=req.name)
+    db.upsert_user(phone, name=req.name, whatsapp_number=req.whatsapp_number)
     db.save_otp(phone, otp_hash, expires_at)
     auth_svc.send_otp_msg91(phone, otp, settings)
 
@@ -127,6 +127,11 @@ def verify_otp(
     db.mark_user_verified(phone)
     user = db.get_user_by_phone(phone)
     user_id = str(user["id"])
+
+    # Phone IS the WhatsApp number — auto-verify on first login
+    if not user.get("whatsapp_number"):
+        db.set_whatsapp_verified(user_id, phone)
+        user = db.get_user_by_phone(phone)
 
     access_token = auth_svc.issue_jwt(user_id, settings)
     refresh_token = auth_svc.issue_refresh_token()
@@ -204,6 +209,7 @@ def update_me(
         current_user["id"],
         name=body.name,
         email=body.email,
+        whatsapp_number=body.whatsapp_number,
         role=body.role,
         bar_enrollment_number=body.bar_enrollment_number,
         firm_name=body.firm_name,
@@ -304,6 +310,73 @@ def verify_email_otp(
     db.mark_email_otp_used(record["id"])
     user = db.set_email_verified(current_user["id"], email)
     return {"user": user, "detail": "Email verified"}
+
+
+class SendWhatsappOTPRequest(BaseModel):
+    whatsapp_number: str
+
+
+class VerifyWhatsappOTPRequest(BaseModel):
+    whatsapp_number: str
+    otp: str
+
+
+@router.post("/whatsapp/send-otp")
+@_limiter.limit("3/minute")
+def send_whatsapp_otp(
+    request: Request,
+    body: SendWhatsappOTPRequest,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict:
+    import re
+
+    number = body.whatsapp_number.strip()
+    if not re.match(r"^\+?[0-9]{10,15}$", number):
+        raise HTTPException(status_code=422, detail="Invalid WhatsApp number")
+
+    existing = db.get_latest_whatsapp_otp_for_user(current_user["id"])
+    if auth_svc.otp_rate_limited(existing):
+        raise HTTPException(status_code=429, detail="OTP already sent — wait 60 seconds")
+
+    otp = auth_svc.issue_otp()
+    otp_hash = auth_svc.hash_otp(otp, settings.otp_hmac_secret)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=auth_svc.OTP_EXPIRE_MINUTES)
+    db.save_whatsapp_otp(number, current_user["id"], otp_hash, expires_at)
+
+    auth_svc.send_otp_msg91(number, otp, settings, channel="whatsapp")
+
+    return {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
+
+
+@router.post("/whatsapp/verify-otp")
+@_limiter.limit("10/minute")
+def verify_whatsapp_otp(
+    request: Request,
+    body: VerifyWhatsappOTPRequest,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict:
+    number = body.whatsapp_number.strip()
+    record = db.get_latest_whatsapp_otp(number)
+    if not record or record["user_id"] != str(current_user["id"]):
+        raise HTTPException(status_code=400, detail="No OTP found — request a new one")
+
+    exp = auth_svc.parse_dt_maybe_iso(record["expires_at"])
+    if datetime.now(timezone.utc) > exp:
+        raise HTTPException(status_code=400, detail="OTP expired — request a new one")
+    if record["attempts"] >= auth_svc.OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many attempts — request a new OTP")
+
+    db.increment_whatsapp_otp_attempts(record["id"])
+    if auth_svc.hash_otp(body.otp, settings.otp_hmac_secret) != record["otp_hash"]:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    db.mark_whatsapp_otp_used(record["id"])
+    user = db.set_whatsapp_verified(current_user["id"], number)
+    return {"user": user, "detail": "WhatsApp number verified"}
 
 
 class NotificationPrefsUpdate(BaseModel):

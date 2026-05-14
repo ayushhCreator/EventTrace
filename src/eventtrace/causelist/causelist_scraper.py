@@ -4,9 +4,10 @@ import re
 from datetime import date, datetime, timezone
 
 import structlog
+from typing import Any
 
 from ..config import Settings
-from ..db import DB
+from ..db import get_db
 from .causelist_parser import fetch_causelist_html, html_to_text
 
 log = structlog.get_logger()
@@ -76,7 +77,7 @@ def scrape_vc_links(for_date: date, settings: Settings) -> dict[str, str]:
     return links
 
 
-def scrape_and_store_vc_links(for_date: date, settings: Settings, db: DB) -> dict[str, str]:
+def scrape_and_store_vc_links(for_date: date, settings: Settings, db: Any) -> dict[str, str]:
     """Sync wrapper: scrape VC links and persist to DB."""
     links = scrape_vc_links(for_date, settings)
     date_str = for_date.isoformat()
@@ -96,7 +97,7 @@ def main() -> None:
     from ..config import Settings
 
     settings = Settings()
-    db = DB(settings.db_path)
+    db = get_db(settings)
     db.ensure_schema()
 
     if len(sys.argv) > 1:

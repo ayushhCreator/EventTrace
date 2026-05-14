@@ -3,9 +3,31 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from fastapi.security import HTTPBearer as _HTTPBearer, HTTPAuthorizationCredentials
+from ..services.deps import get_db, get_settings
+from ..services import auth as _auth_svc
 
-from ..services.deps import get_db
+_opt_bearer = _HTTPBearer(auto_error=False)
+_COOKIE_NAME = "et_token"
+
+
+def _optional_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(_opt_bearer),
+    db: Any = Depends(get_db),
+    settings=Depends(get_settings),
+) -> dict | None:
+    token = request.cookies.get(_COOKIE_NAME)
+    if not token and credentials:
+        token = credentials.credentials
+    if not token:
+        return None
+    try:
+        payload = _auth_svc.decode_jwt(token, settings)
+        return db.get_user_by_id(payload["sub"])
+    except Exception:
+        return None
 
 router = APIRouter(prefix="/causelist")
 
@@ -34,14 +56,16 @@ def causelist_search(
     date_to: str | None = Query(None),
     side: str | None = Query(None),
     list_type: str | None = Query(None),
+    section: str | None = Query(None, description="Filter by section/category e.g. PIL, GROUP_IX, CONTEMPT"),
     limit: int = Query(100, ge=1, le=500),
     db: Any = Depends(get_db),
+    current_user: dict | None = Depends(_optional_user),
 ) -> list[dict]:
-    if not any([case_ref, advocate, party, judge]):
+    if not any([case_ref, advocate, party, judge, section]):
         raise HTTPException(
-            status_code=422, detail="Provide at least one of: case_ref, advocate, party, judge"
+            status_code=422, detail="Provide at least one of: case_ref, advocate, party, judge, section"
         )
-    return db.search_causelist_cases(
+    results = db.search_causelist_cases(
         case_ref=case_ref,
         advocate=advocate,
         party=party,
@@ -50,8 +74,24 @@ def causelist_search(
         date_to=date_to,
         side=side,
         list_type=list_type,
+        section=section,
         limit=limit,
     )
+    if current_user:
+        query_parts = [f"{k}={v}" for k, v in [
+            ("case_ref", case_ref), ("advocate", advocate), ("party", party),
+            ("judge", judge), ("section", section),
+        ] if v]
+        try:
+            db.log_search(
+                user_id=str(current_user["id"]),
+                query_type="causelist",
+                query_text="; ".join(query_parts),
+                result_count=len(results),
+            )
+        except Exception:
+            pass
+    return results
 
 
 @router.get("/{list_date}")

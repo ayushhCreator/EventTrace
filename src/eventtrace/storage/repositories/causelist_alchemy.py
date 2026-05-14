@@ -158,6 +158,7 @@ class SQLAlchemyCauselistRepository:
         date_to: str | None = None,
         side: str | None = None,
         list_type: str | None = None,
+        section: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         with Session(self._engine) as session:
@@ -206,6 +207,8 @@ class SQLAlchemyCauselistRepository:
                 q = q.where(CauselistBench.side == side)
             if list_type:
                 q = q.where(CauselistBench.list_type == list_type)
+            if section:
+                q = q.where(CauselistCase.section.ilike(f"%{section}%"))
 
             rows = session.execute(q).mappings().all()
         return [dict(r) for r in rows]

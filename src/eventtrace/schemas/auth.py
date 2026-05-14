@@ -13,10 +13,18 @@ except ImportError:  # pragma: no cover (Pydantic v1 fallback)
 class SendOTPRequest(BaseModel):
     phone: str  # E.164 e.g. "+919876543210"
     name: str | None = None
+    whatsapp_number: str | None = None
 
     @field_validator("phone")
     @classmethod
     def _v_phone(cls, v: str) -> str:
+        return normalize_phone_value(v)
+
+    @field_validator("whatsapp_number")
+    @classmethod
+    def _v_whatsapp_number(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         return normalize_phone_value(v)
 
 
@@ -33,7 +41,15 @@ class VerifyOTPRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
     email: str | None = None
+    whatsapp_number: str | None = None
     role: str | None = None
     bar_enrollment_number: str | None = None
     firm_name: str | None = None
     secondary_email: str | None = None
+
+    @field_validator("whatsapp_number")
+    @classmethod
+    def _v_whatsapp_number(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_phone_value(v)

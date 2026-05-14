@@ -7,6 +7,10 @@ import json
 import structlog
 from typing import Any
 
+_HEARING_FIELDS = frozenset(["next_date", "date_of_hearing", "hearing_date", "listing_date", "next_hearing"])
+_JUDGE_FIELDS = frozenset(["presiding_officer", "judge", "bench", "judge_name"])
+_ORDER_FIELDS = frozenset(["order", "judgment", "document"])
+
 log = structlog.get_logger()
 
 _SNAPSHOT_FIELDS = [
@@ -126,36 +130,47 @@ def run_daily_case_diff(db: Any, date: str) -> None:
                 _send_change_alerts(db, case_ref, users, diff, date)
 
 
-def _send_change_alerts(db: Any, case_ref: str, user_ids: list[str], diff: dict, date: str) -> None:
-    from .notifications import send_alert
+def _classify_change(field: str) -> str:
+    fl = field.lower()
+    if any(hf in fl for hf in _HEARING_FIELDS):
+        return "hearing_date_changed"
+    if any(jf in fl for jf in _JUDGE_FIELDS):
+        return "judge_changed"
+    if any(of in fl for of in _ORDER_FIELDS):
+        return "order_uploaded"
+    return "status_changed"
 
-    summary_parts = [f"{c['field']}: {c['old']} → {c['new']}" for c in diff.get("changed", [])[:3]]
-    summary = "; ".join(summary_parts)
+
+def _send_change_alerts(db: Any, case_ref: str, user_ids: list[str], diff: dict, date: str) -> None:
+    from .notification_dispatch import enqueue_notification
+
+    changed_fields = diff.get("changed", [])
+    # Build one context per distinct trigger type (first match wins per type)
+    trigger_contexts: dict[str, dict] = {}
+    for c in changed_fields:
+        ttype = _classify_change(c["field"])
+        if ttype in trigger_contexts:
+            continue
+        if ttype in ("hearing_date_changed", "judge_changed"):
+            trigger_contexts[ttype] = {"old_value": c["old"], "new_value": c["new"], "date": date}
+        elif ttype == "order_uploaded":
+            trigger_contexts[ttype] = {
+                "summary": f"{c['field']}: {c['old']} → {c['new']}",
+                "date": date,
+            }
+        else:
+            trigger_contexts[ttype] = {"old_value": c["old"], "new_value": c["new"], "date": date}
 
     for user_id in user_ids:
-        try:
-            prefs = db.get_notification_prefs(user_id)
-            if not prefs.get("change_alerts", True):
-                continue
-            tracked = db.get_tracked_case(user_id, case_ref)
-            if not tracked:
-                continue
-            send_alert(
-                db,
-                tracked,
-                "case_updated",
-                {
-                    "date": date,
-                    "summary": summary,
-                    "diff": diff,
-                },
-            )
-        except Exception as exc:
-            log.warning("change alert failed user=%s case=%s: %s", user_id, case_ref, exc)
+        for ttype, ctx in trigger_contexts.items():
+            try:
+                enqueue_notification(db, user_id, case_ref, ttype, ctx)
+            except Exception as exc:
+                log.warning("change alert failed user=%s case=%s trigger=%s: %s", user_id, case_ref, ttype, exc)
 
 
 def run_causelist_alert_scan(db: Any, date: str) -> None:
-    from .notifications import send_alert
+    from .notification_dispatch import enqueue_notification
 
     case_refs = db.get_all_tracked_case_refs()
     if not case_refs:
@@ -181,18 +196,10 @@ def run_causelist_alert_scan(db: Any, date: str) -> None:
 
             for user_id in users:
                 try:
-                    prefs = db.get_notification_prefs(user_id)
-                    if not prefs.get("causelist_alerts", True):
-                        continue
-                    already = db.has_causelist_alert_today(user_id, case_ref, date)
-                    if already:
-                        continue
-                    tracked = db.get_tracked_case(user_id, case_ref)
-                    if not tracked:
-                        continue
-                    send_alert(
+                    enqueue_notification(
                         db,
-                        tracked,
+                        user_id,
+                        case_ref,
                         "case_in_causelist",
                         {
                             "date": date,

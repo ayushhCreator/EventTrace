@@ -67,19 +67,12 @@ def check_serial_alerts(db: Any, current_snapshot: list[dict]) -> None:
 
 
 def _fire_serial_alert(db: Any, tracked_case: dict, current_serial: int, today: str) -> None:
-    from .notifications import send_alert
+    from .notification_dispatch import enqueue_notification
 
-    prefs: dict = {}
-    try:
-        prefs = db.get_notification_prefs(str(tracked_case["user_id"]))
-    except Exception:
-        pass
-    if not prefs.get("serial_alerts", True):
-        return
-
-    send_alert(
+    enqueue_notification(
         db,
-        tracked_case,
+        str(tracked_case["user_id"]),
+        tracked_case["case_ref"],
         "serial_reached",
         {
             "court_no": tracked_case.get("court_no", ""),
@@ -100,3 +93,53 @@ def _fire_serial_alert(db: Any, tracked_case: dict, current_serial: int, today: 
         tracked_case.get("court_no"),
         current_serial,
     )
+
+
+def check_display_board_triggers(db: Any, current_snapshot: list[dict]) -> None:
+    """Fire display_board_active when the board serial has reached a tracked case's alert_serial."""
+    today = ist_today_str()
+
+    for row in current_snapshot:
+        court_no = str(row.get("room_no", "")).strip()
+        if not court_no:
+            continue
+
+        current_serial = _current_serial_from_row(row)
+        if current_serial is None:
+            continue
+
+        try:
+            tracked_cases = db.list_active_case_alerts(court_no, today)
+        except Exception as exc:
+            log.warning("list_active_case_alerts failed court=%s: %s", court_no, exc)
+            continue
+
+        for tc in tracked_cases:
+            alert_serial = tc.get("alert_serial")
+            if alert_serial is None:
+                continue
+            if current_serial < int(alert_serial):
+                continue
+
+            try:
+                from .notification_dispatch import enqueue_notification
+
+                enqueue_notification(
+                    db,
+                    str(tc["user_id"]),
+                    tc["case_ref"],
+                    "display_board_active",
+                    {
+                        "court_no": court_no,
+                        "serial_no": current_serial,
+                        "status": f"Board at serial {current_serial}",
+                        "date": today,
+                    },
+                )
+            except Exception as exc:
+                log.warning(
+                    "display_board_active failed user=%s case=%s: %s",
+                    tc.get("user_id"),
+                    tc.get("case_ref"),
+                    exc,
+                )

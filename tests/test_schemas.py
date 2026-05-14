@@ -33,6 +33,14 @@ class TestSendOTPRequest(unittest.TestCase):
         r = SendOTPRequest(phone="+919876543210", name="Advocate Singh")
         self.assertEqual(r.name, "Advocate Singh")
 
+    def test_whatsapp_number_optional_defaults_none(self):
+        r = SendOTPRequest(phone="+919876543210")
+        self.assertIsNone(r.whatsapp_number)
+
+    def test_whatsapp_number_normalizes(self):
+        r = SendOTPRequest(phone="+919876543210", whatsapp_number="98765 43210")
+        self.assertEqual(r.whatsapp_number, "+919876543210")
+
     def test_short_phone_rejected(self):
         with self.assertRaises(ValidationError):
             SendOTPRequest(phone="12345")
@@ -61,11 +69,16 @@ class TestUpdateProfileRequest(unittest.TestCase):
         r = UpdateProfileRequest()
         self.assertIsNone(r.name)
         self.assertIsNone(r.email)
+        self.assertIsNone(r.whatsapp_number)
 
     def test_name_and_email(self):
         r = UpdateProfileRequest(name="Alice", email="alice@example.com")
         self.assertEqual(r.name, "Alice")
         self.assertEqual(r.email, "alice@example.com")
+
+    def test_whatsapp_number_normalizes(self):
+        r = UpdateProfileRequest(whatsapp_number="9876543210")
+        self.assertEqual(r.whatsapp_number, "+919876543210")
 
 
 class TestAlertRequest(unittest.TestCase):

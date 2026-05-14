@@ -103,11 +103,91 @@ class NotificationLog(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     sub_id = Column(BigInteger, ForeignKey("subscriptions.id"), nullable=True)
     sent_at = Column(String, nullable=False)
-    payload = Column(Text, nullable=False)
+    payload = Column(Text, nullable=True)
     tracked_case_id = Column(Integer, nullable=True)
     status = Column(String, nullable=False, default="sent")
+    # Phase 1 WhatsApp notification fields
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    case_ref = Column(Text, nullable=True)
+    notification_type = Column(String, nullable=True)
+    channel = Column(String, nullable=True)
+    message_text = Column(Text, nullable=True)
+    provider = Column(String, nullable=True)
+    provider_response = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    delivered_at = Column(String, nullable=True)
+    read_at = Column(String, nullable=True)
+    dedup_key = Column(String, nullable=True)
 
     subscription = relationship("Subscription", back_populates="notifications")
+    user = relationship("User", back_populates="notification_logs", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_notification_log_user", "user_id"),
+        Index("idx_notification_log_case_ref", "case_ref"),
+        Index("idx_notification_log_sent_at", "sent_at"),
+        Index("idx_notification_log_dedup", "dedup_key"),
+    )
+
+
+class AlertPreference(Base):
+    __tablename__ = "alert_preferences"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    case_ref = Column(Text, nullable=False)
+    trigger_type = Column(String, nullable=False)
+    channel = Column(String, nullable=False, default="whatsapp")
+    enabled = Column(Integer, nullable=False, default=1)
+    quiet_hours_start = Column(Integer, nullable=True)
+    quiet_hours_end = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "case_ref", "trigger_type", name="uq_alert_pref"),
+        Index("idx_alert_pref_user_case", "user_id", "case_ref"),
+    )
+
+
+class NotificationQueue(Base):
+    __tablename__ = "notification_queue"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    notification_log_id = Column(
+        BigInteger, ForeignKey("notification_log.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    case_ref = Column(Text, nullable=True)
+    notification_type = Column(String, nullable=False)
+    channel = Column(String, nullable=False, default="whatsapp")
+    payload_json = Column(Text, nullable=False)
+    scheduled_at = Column(String, nullable=False)
+    locked_until = Column(String, nullable=True)
+    worker_id = Column(String, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+
+    __table_args__ = (
+        Index("idx_nq_scheduled", "scheduled_at"),
+        Index("idx_nq_user", "user_id"),
+    )
+
+
+class SearchLog(Base):
+    __tablename__ = "search_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    query_type = Column(String, nullable=False)
+    query_text = Column(Text, nullable=False)
+    result_count = Column(Integer, nullable=True)
+    searched_at = Column(String, nullable=False)
+    court_source = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("idx_search_log_user", "user_id"),
+        Index("idx_search_log_type", "query_type"),
+        Index("idx_search_log_searched_at", "searched_at"),
+    )
 
 
 class MonitorState(Base):
@@ -201,6 +281,7 @@ class User(Base):
 
     id = Column(String, primary_key=True)
     phone = Column(String, nullable=False, unique=True)
+    whatsapp_number = Column(String, nullable=True)
     email = Column(String, nullable=True)
     name = Column(String, nullable=True)
     role = Column(String, nullable=False, default="client")
@@ -213,6 +294,8 @@ class User(Base):
     firm_name = Column(String, nullable=True)
     secondary_email = Column(String, nullable=True)
     is_admin = Column(Integer, nullable=False, default=0)
+    whatsapp_verified = Column(Integer, nullable=False, default=0)
+    daily_wa_cap = Column(Integer, nullable=False, default=100)
 
     otps = relationship(
         "PhoneOtp",
@@ -225,6 +308,7 @@ class User(Base):
         "CaseTimelineEvent", back_populates="user", cascade="all, delete-orphan"
     )
     matters = relationship("Matter", back_populates="user", cascade="all, delete-orphan")
+    notification_logs = relationship("NotificationLog", back_populates="user", cascade="all, delete-orphan")
 
 
 class PhoneOtp(Base):
@@ -256,6 +340,19 @@ class EmailOtp(Base):
     created_at = Column(String, nullable=False)
 
 
+class WhatsappOtp(Base):
+    __tablename__ = "whatsapp_otps"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    whatsapp_number = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+    otp_hash = Column(String, nullable=False)
+    expires_at = Column(String, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    used = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False)
+
+
 class TrackedCase(Base):
     __tablename__ = "tracked_cases"
 
@@ -274,6 +371,12 @@ class TrackedCase(Base):
     look_ahead = Column(Integer, nullable=False, default=5)
     added_at = Column(String, nullable=False)
     alerted_at = Column(String, nullable=True)
+    cino = Column(Text, nullable=True)
+    case_type_id = Column(Text, nullable=True)
+    state_cd = Column(Text, nullable=True)
+    court_code = Column(Text, nullable=True)
+    case_no = Column(Text, nullable=True)
+    case_year = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="tracked_cases")
 
@@ -281,6 +384,7 @@ class TrackedCase(Base):
         UniqueConstraint("user_id", "case_ref", name="uq_tracked_case"),
         Index("idx_tracked_cases_user", "user_id"),
         Index("idx_tracked_cases_ref", "case_ref"),
+        Index("idx_tracked_cases_refresh", "court_no", "list_date"),
     )
 
 

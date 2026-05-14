@@ -14,6 +14,7 @@ from ..domain.models import EventTrace
 from .repositories.auth_alchemy import SQLAlchemyAuthRepository
 from .repositories.causelist_alchemy import SQLAlchemyCauselistRepository
 from .repositories.events_alchemy import SQLAlchemyEventsRepository
+from .repositories.notification_alchemy import SQLAlchemyNotificationRepository
 from .repositories.subscriptions_alchemy import SQLAlchemySubscriptionsRepository
 from .repositories.timeline_alchemy import SQLAlchemyTimelineRepository
 
@@ -50,6 +51,7 @@ class PostgresDB:
         self._causelist = SQLAlchemyCauselistRepository(self._engine)
         self._auth = SQLAlchemyAuthRepository(self._engine)
         self._timeline = SQLAlchemyTimelineRepository(self._engine)
+        self._notifications = SQLAlchemyNotificationRepository(self._engine)
 
     def _get_pool(self):
         if self._pool is not None:
@@ -90,422 +92,9 @@ class PostgresDB:
             pool.putconn(con)
 
     def ensure_schema(self) -> None:
-        ddl = [
-            """
-            CREATE TABLE IF NOT EXISTS current_state (
-              court_id TEXT PRIMARY KEY,
-              data_json TEXT NOT NULL,
-              last_seen_time TEXT NOT NULL
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS field_state (
-              court_id TEXT NOT NULL,
-              field_name TEXT NOT NULL,
-              value TEXT,
-              start_time TEXT NOT NULL,
-              last_seen_time TEXT NOT NULL,
-              PRIMARY KEY (court_id, field_name)
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS event_trace (
-              id SERIAL PRIMARY KEY,
-              court_id TEXT NOT NULL,
-              field_name TEXT NOT NULL,
-              old_value TEXT,
-              new_value TEXT,
-              start_time TEXT NOT NULL,
-              end_time TEXT NOT NULL,
-              duration_seconds INTEGER NOT NULL,
-              observed_time TEXT NOT NULL
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_event_trace_time ON event_trace(observed_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_event_trace_court ON event_trace(court_id, observed_time DESC)",
-            """
-            CREATE TABLE IF NOT EXISTS vc_zoom_link (
-              date       TEXT NOT NULL,
-              room_no    TEXT NOT NULL,
-              zoom_url   TEXT NOT NULL,
-              scraped_at TEXT NOT NULL,
-              PRIMARY KEY (date, room_no)
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS subscriptions (
-              id            SERIAL PRIMARY KEY,
-              telegram_id   TEXT NOT NULL,
-              room_no       TEXT NOT NULL,
-              target_serial INTEGER NOT NULL,
-              look_ahead    INTEGER NOT NULL DEFAULT 5,
-              active        INTEGER NOT NULL DEFAULT 1,
-              created_at    TEXT NOT NULL,
-              hearing_date  TEXT,
-              contact_type  TEXT NOT NULL DEFAULT 'telegram',
-              last_notified_serial INTEGER,
-              display_name  TEXT,
-              phone         TEXT,
-              alerted_at    TEXT,
-              reminder_sent INTEGER NOT NULL DEFAULT 0
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS notification_log (
-              id     SERIAL PRIMARY KEY,
-              sub_id INTEGER REFERENCES subscriptions(id),
-              sent_at TEXT NOT NULL,
-              payload TEXT NOT NULL
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS monitor_state (
-              key   TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS causelist_bench (
-              id           SERIAL PRIMARY KEY,
-              list_date    TEXT NOT NULL,
-              court_no     TEXT NOT NULL,
-              bench_label  TEXT,
-              side         TEXT,
-              list_type    TEXT,
-              judges_json  TEXT NOT NULL DEFAULT '[]',
-              not_sitting  INTEGER NOT NULL DEFAULT 0,
-              vc_link      TEXT,
-              jurisdiction TEXT,
-              scraped_at   TEXT NOT NULL,
-              UNIQUE(list_date, court_no)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_causelist_bench_date ON causelist_bench(list_date)",
-            "CREATE INDEX IF NOT EXISTS idx_causelist_bench_court ON causelist_bench(court_no, list_date)",
-            """
-            CREATE TABLE IF NOT EXISTS causelist_case (
-              id              SERIAL PRIMARY KEY,
-              bench_id        INTEGER NOT NULL REFERENCES causelist_bench(id) ON DELETE CASCADE,
-              list_date       TEXT NOT NULL,
-              court_no        TEXT NOT NULL,
-              serial_no       INTEGER NOT NULL,
-              case_ref        TEXT,
-              case_type       TEXT,
-              case_number     TEXT,
-              case_year       INTEGER,
-              petitioner      TEXT,
-              respondent      TEXT,
-              advocate        TEXT,
-              pro_se          INTEGER NOT NULL DEFAULT 0,
-              ia_numbers_json TEXT NOT NULL DEFAULT '[]',
-              section         TEXT,
-              subsection      TEXT,
-              hearing_type    TEXT,
-              raw_text        TEXT,
-              scraped_at      TEXT NOT NULL,
-              UNIQUE(bench_id, serial_no)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_causelist_case_ref ON causelist_case(case_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_causelist_case_date_court ON causelist_case(list_date, court_no)",
-            "CREATE INDEX IF NOT EXISTS idx_causelist_case_type_year ON causelist_case(case_type, case_year)",
-            "CREATE INDEX IF NOT EXISTS idx_causelist_case_advocate ON causelist_case(advocate)",
-            # ── Auth / subscription model ────────────────────────────────────
-            """
-            CREATE TABLE IF NOT EXISTS tracked_cases (
-              id           SERIAL PRIMARY KEY,
-              user_id      UUID NOT NULL,
-              case_ref     TEXT NOT NULL,
-              court_no     TEXT,
-              bench_label  TEXT,
-              judges_json  TEXT,
-              list_date    TEXT,
-              serial_no    INTEGER,
-              petitioner   TEXT,
-              respondent   TEXT,
-                            cino         TEXT,
-                            case_type_id TEXT,
-                            state_cd     TEXT,
-                            court_code   TEXT,
-                            case_no      TEXT,
-                            case_year    TEXT,
-              alert_active INTEGER NOT NULL DEFAULT 0,
-              alert_serial INTEGER,
-              look_ahead   INTEGER NOT NULL DEFAULT 5,
-              added_at     TEXT NOT NULL,
-              UNIQUE(user_id, case_ref)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_tracked_cases_user ON tracked_cases(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_tracked_cases_ref ON tracked_cases(case_ref)",
-            """
-            CREATE TABLE IF NOT EXISTS case_history_cache (
-                cino         TEXT NOT NULL,
-                state_cd     TEXT NOT NULL,
-                court_code   TEXT NOT NULL,
-                case_type_id TEXT,
-                case_no      TEXT,
-                case_year    TEXT,
-                data_json    TEXT NOT NULL,
-                fetched_at   TEXT NOT NULL,
-                PRIMARY KEY (cino, state_cd, court_code)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_case_history_cache_fetched ON case_history_cache(fetched_at DESC)",
-            # ── Phone-OTP auth ────────────────────────────────────────────────
-            """
-            CREATE TABLE IF NOT EXISTS users (
-              id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-              phone       TEXT NOT NULL UNIQUE,
-              email       TEXT,
-              name        TEXT,
-              role        TEXT NOT NULL DEFAULT 'client',
-              tier        TEXT NOT NULL DEFAULT 'free',
-              verified    INTEGER NOT NULL DEFAULT 0,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)",
-            """
-            CREATE TABLE IF NOT EXISTS phone_otps (
-              id          SERIAL PRIMARY KEY,
-              phone       TEXT NOT NULL,
-              otp_hash    TEXT NOT NULL,
-              expires_at  TIMESTAMPTZ NOT NULL,
-              attempts    INTEGER NOT NULL DEFAULT 0,
-              used        INTEGER NOT NULL DEFAULT 0,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_phone_otps_phone ON phone_otps(phone)",
-            """
-            CREATE TABLE IF NOT EXISTS email_otps (
-              id          SERIAL PRIMARY KEY,
-              email       TEXT NOT NULL,
-              user_id     TEXT NOT NULL,
-              otp_hash    TEXT NOT NULL,
-              expires_at  TIMESTAMPTZ NOT NULL,
-              attempts    INTEGER NOT NULL DEFAULT 0,
-              used        INTEGER NOT NULL DEFAULT 0,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_email_otps_email ON email_otps(email)",
-            "CREATE INDEX IF NOT EXISTS idx_email_otps_user ON email_otps(user_id)",
-            """
-            CREATE TABLE IF NOT EXISTS case_snapshots (
-              id         SERIAL PRIMARY KEY,
-              case_ref   TEXT NOT NULL,
-              list_date  TEXT NOT NULL,
-              data_json  TEXT NOT NULL,
-              hash       TEXT NOT NULL,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-              UNIQUE(case_ref, list_date)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_case_snapshots_ref ON case_snapshots(case_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_case_snapshots_date ON case_snapshots(list_date)",
-            """
-            CREATE TABLE IF NOT EXISTS case_timeline_events (
-              id             SERIAL PRIMARY KEY,
-              user_id        UUID NOT NULL,
-              case_ref       TEXT NOT NULL,
-              event_type     TEXT NOT NULL,
-              event_date     TEXT NOT NULL,
-              change_summary TEXT,
-              created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_cte_user_ref ON case_timeline_events(user_id, case_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_cte_event_date ON case_timeline_events(event_date)",
-            # ── Matters (case billing registration) ──────────────────────────
-            """
-            CREATE TABLE IF NOT EXISTS matter (
-              id              SERIAL PRIMARY KEY,
-              user_id         UUID NOT NULL,
-              case_ref        TEXT NOT NULL,
-              case_title      TEXT,
-              case_type       TEXT,
-              case_number     TEXT,
-              case_year       INTEGER,
-              court_no        TEXT,
-              petitioner      TEXT,
-              respondent      TEXT,
-              status          TEXT NOT NULL DEFAULT 'active',
-              billing_mode    TEXT NOT NULL DEFAULT 'appearance',
-              fee_per_appearance NUMERIC(12,2),
-              notes           TEXT,
-              opened_at       DATE,
-              closed_at       DATE,
-              created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-              UNIQUE(user_id, case_ref)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_matter_user ON matter(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_matter_case_ref ON matter(case_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_matter_status ON matter(user_id, status)",
-        ]
-        with self._cursor() as cur:
-            # Try to enable trigram extension — non-fatal if superuser not available
-            try:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-            except Exception:
-                pass
-            for stmt in ddl:
-                cur.execute(stmt)
-            # Trigram indexes — non-fatal if extension unavailable
-            for idx_sql in [
-                "CREATE INDEX IF NOT EXISTS idx_cc_advocate_trgm ON causelist_case USING GIN (advocate gin_trgm_ops)",
-                "CREATE INDEX IF NOT EXISTS idx_cc_petitioner_trgm ON causelist_case USING GIN (petitioner gin_trgm_ops)",
-                "CREATE INDEX IF NOT EXISTS idx_cc_respondent_trgm ON causelist_case USING GIN (respondent gin_trgm_ops)",
-            ]:
-                try:
-                    cur.execute(idx_sql)
-                except Exception:
-                    pass
-
-            # Non-destructive column migrations for tracked_cases (safe to re-run)
-            for _col in [
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS court_no TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS bench_label TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS judges_json TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS list_date TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS serial_no INTEGER",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS petitioner TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS respondent TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS cino TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_type_id TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS state_cd TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS court_code TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_no TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS case_year TEXT",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_active INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alert_serial INTEGER",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS look_ahead INTEGER NOT NULL DEFAULT 5",
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS added_at TEXT NOT NULL DEFAULT NOW()::TEXT",
-            ]:
-                try:
-                    cur.execute(_col)
-                except Exception:
-                    pass
-
-            # Additional column migrations
-            for _col in [
-                "ALTER TABLE tracked_cases ADD COLUMN IF NOT EXISTS alerted_at TEXT",
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs TEXT",
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS tracked_case_id INTEGER",
-                "ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent'",
-            ]:
-                try:
-                    cur.execute(_col)
-                except Exception:
-                    pass
-
-            # Indexes on tracked_cases columns that were added via ALTER TABLE
-            for idx_sql in [
-                "CREATE INDEX IF NOT EXISTS idx_tracked_cases_cino ON tracked_cases(cino)",
-                "CREATE INDEX IF NOT EXISTS idx_tracked_cases_refresh ON tracked_cases(state_cd, court_code, case_type_id)",
-            ]:
-                try:
-                    cur.execute(idx_sql)
-                except Exception:
-                    pass
-
-            # Drop stale FK to profiles (if still present on old DBs). No FK re-added:
-            # user_id is TEXT on old tables, UUID on new — JWT auth enforces ownership.
-            try:
-                cur.execute(
-                    "ALTER TABLE tracked_cases DROP CONSTRAINT IF EXISTS tracked_cases_user_id_fkey"
-                )
-            except Exception:
-                pass
-
-            # ── causelist_bench schema migration ─────────────────────────────
-            # Step 1: add source_id column
-            try:
-                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS source_id TEXT")
-                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS at_time TEXT")
-                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS floor TEXT")
-                cur.execute("ALTER TABLE causelist_bench ADD COLUMN IF NOT EXISTS building TEXT")
-            except Exception:
-                pass
-
-            # Step 2: normalise side/list_type values and backfill source_id.
-            # Historical data has mixed-case values, non-breaking spaces, and
-            # NULL source_id. Canonicalise everything so ON CONFLICT works.
-            try:
-                cur.execute(r"""
-                    UPDATE causelist_bench
-                    SET side = CASE
-                        WHEN regexp_replace(upper(side), '\s+', ' ', 'g') LIKE '%ORIGINAL%'
-                            THEN 'ORIGINAL SIDE'
-                        ELSE 'APPELLATE SIDE'
-                    END
-                    WHERE side IS NULL
-                       OR upper(side) != side
-                       OR side LIKE '%' || chr(160) || '%'
-                """)
-                cur.execute("""
-                    UPDATE causelist_bench
-                    SET list_type = upper(list_type)
-                    WHERE list_type IS NOT NULL AND upper(list_type) != list_type
-                """)
-                cur.execute("""
-                    UPDATE causelist_bench
-                    SET list_type = 'DAILY'
-                    WHERE list_type IS NULL
-                """)
-                cur.execute("""
-                    UPDATE causelist_bench
-                    SET source_id = CASE
-                        WHEN side = 'ORIGINAL SIDE' THEN 'original_unknown'
-                        ELSE 'appellate_static'
-                    END
-                    WHERE source_id IS NULL
-                """)
-            except Exception:
-                pass
-
-            # Step 3: drop old 2-column unique constraint and replace with 4-column one.
-            # We find the constraint by searching pg_constraint regardless of its
-            # auto-generated name, so this survives Supabase / Railway naming quirks.
-            try:
-                cur.execute("""
-                    DO $$
-                    DECLARE
-                        cname TEXT;
-                    BEGIN
-                        -- Find any unique constraint on causelist_bench that covers
-                        -- exactly (list_date, court_no) — 2 columns.
-                        SELECT c.conname INTO cname
-                        FROM pg_constraint c
-                        JOIN pg_class t ON t.oid = c.conrelid
-                        WHERE t.relname = 'causelist_bench'
-                          AND c.contype = 'u'
-                          AND array_length(c.conkey, 1) = 2
-                        LIMIT 1;
-
-                        IF cname IS NOT NULL THEN
-                            EXECUTE format('ALTER TABLE causelist_bench DROP CONSTRAINT %I', cname);
-                        END IF;
-
-                        -- Add new 4-column constraint (idempotent via IF NOT EXISTS check)
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_constraint c
-                            JOIN pg_class t ON t.oid = c.conrelid
-                            WHERE t.relname = 'causelist_bench'
-                              AND c.contype = 'u'
-                              AND array_length(c.conkey, 1) = 4
-                        ) THEN
-                            ALTER TABLE causelist_bench
-                                ADD CONSTRAINT causelist_bench_unique_source
-                                UNIQUE (list_date, court_no, side, list_type);
-                        END IF;
-                    END $$;
-                """)
-            except Exception:
-                pass
+        """Schema is managed by SQLAlchemy models and Alembic migrations."""
+        import structlog
+        structlog.get_logger().info("ensure_schema: Schema is managed by Alembic. Skipping raw SQL schema creation.")
 
     # ── Events delegation ────────────────────────────────────────────────────
 
@@ -694,6 +283,7 @@ class PostgresDB:
         date_to: str | None = None,
         side: str | None = None,
         list_type: str | None = None,
+        section: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         return self._causelist.search_causelist_cases(
@@ -705,6 +295,7 @@ class PostgresDB:
             date_to,
             side=side,
             list_type=list_type,
+            section=section,
             limit=limit,
         )
 
@@ -730,8 +321,14 @@ class PostgresDB:
     def get_user_by_id(self, user_id: str) -> dict | None:
         return self._auth.get_user_by_id(user_id)
 
-    def upsert_user(self, phone: str, name: str | None = None, email: str | None = None) -> dict:
-        return self._auth.upsert_user(phone, name, email)
+    def upsert_user(
+        self,
+        phone: str,
+        name: str | None = None,
+        email: str | None = None,
+        whatsapp_number: str | None = None,
+    ) -> dict:
+        return self._auth.upsert_user(phone, name, email, whatsapp_number=whatsapp_number)
 
     def mark_user_verified(self, phone: str) -> None:
         return self._auth.mark_user_verified(phone)
@@ -753,6 +350,7 @@ class PostgresDB:
         user_id: str,
         name: str | None = None,
         email: str | None = None,
+        whatsapp_number: str | None = None,
         role: str | None = None,
         bar_enrollment_number: str | None = None,
         firm_name: str | None = None,
@@ -762,6 +360,7 @@ class PostgresDB:
             user_id,
             name=name,
             email=email,
+            whatsapp_number=whatsapp_number,
             role=role,
             bar_enrollment_number=bar_enrollment_number,
             firm_name=firm_name,
@@ -785,6 +384,29 @@ class PostgresDB:
 
     def set_email_verified(self, user_id: str, email: str) -> dict | None:
         return self._auth.set_email_verified(user_id, email)
+
+    # ── WhatsApp OTP ──────────────────────────────────────────────────────────
+
+    def save_whatsapp_otp(self, whatsapp_number: str, user_id: str, otp_hash: str, expires_at: Any) -> None:
+        return self._auth.save_whatsapp_otp(whatsapp_number, user_id, otp_hash, expires_at)
+
+    def get_latest_whatsapp_otp(self, whatsapp_number: str) -> dict | None:
+        return self._auth.get_latest_whatsapp_otp(whatsapp_number)
+
+    def get_latest_whatsapp_otp_for_user(self, user_id: str) -> dict | None:
+        return self._auth.get_latest_whatsapp_otp_for_user(user_id)
+
+    def increment_whatsapp_otp_attempts(self, otp_id: int) -> None:
+        return self._auth.increment_whatsapp_otp_attempts(otp_id)
+
+    def mark_whatsapp_otp_used(self, otp_id: int) -> None:
+        return self._auth.mark_whatsapp_otp_used(otp_id)
+
+    def set_whatsapp_verified(self, user_id: str, whatsapp_number: str) -> dict | None:
+        return self._auth.set_whatsapp_verified(user_id, whatsapp_number)
+
+    def get_user_stats(self) -> dict:
+        return self._auth.get_user_stats()
 
     def save_refresh_token(self, user_id: str, token_hash: str, expires_at: str) -> None:
         return self._auth.save_refresh_token(user_id, token_hash, expires_at)
@@ -1055,6 +677,165 @@ class PostgresDB:
 
     def update_notification_prefs(self, user_id: str, prefs: dict) -> dict:
         return self._auth.update_notification_prefs(user_id, prefs)
+
+    # ── Notification repository delegation ───────────────────────────────────
+
+    def create_notification_log(
+        self,
+        user_id: str,
+        case_ref: str,
+        notification_type: str,
+        channel: str,
+        message_text: str,
+        status: str = "queued",
+        tracked_case_id: int | None = None,
+        provider: str | None = None,
+        dedup_key: str | None = None,
+    ) -> int:
+        return self._notifications.create_notification_log(
+            user_id,
+            case_ref,
+            notification_type,
+            channel,
+            message_text,
+            status=status,
+            tracked_case_id=tracked_case_id,
+            provider=provider,
+            dedup_key=dedup_key,
+        )
+
+    def update_notification_status(
+        self,
+        log_id: int,
+        status: str,
+        provider_response: str | None = None,
+        delivered_at: str | None = None,
+        read_at: str | None = None,
+    ) -> None:
+        return self._notifications.update_notification_status(
+            log_id,
+            status,
+            provider_response=provider_response,
+            delivered_at=delivered_at,
+            read_at=read_at,
+        )
+
+    def get_user_notifications(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        case_ref: str | None = None,
+        status: str | None = None,
+        unread_only: bool = False,
+    ) -> tuple[list[dict], int]:
+        return self._notifications.get_user_notifications(
+            user_id, limit=limit, offset=offset, case_ref=case_ref, status=status, unread_only=unread_only
+        )
+
+    def count_unread_notifications(self, user_id: str) -> int:
+        return self._notifications.count_unread_notifications(user_id)
+
+    def mark_notification_read(self, log_id: int, user_id: str) -> bool:
+        return self._notifications.mark_notification_read(log_id, user_id)
+
+    def mark_all_notifications_read(self, user_id: str) -> int:
+        return self._notifications.mark_all_notifications_read(user_id)
+
+    def get_notification_stats(self, days: int = 7) -> dict:
+        return self._notifications.get_notification_stats(days)
+
+    def get_top_searches(self, limit: int = 20) -> list[dict]:
+        return self._notifications.get_top_searches(limit)
+
+    def find_notification_log_by_provider_id(self, provider_id: str) -> dict | None:
+        return self._notifications.find_notification_log_by_provider_id(provider_id)
+
+    def check_daily_cap(self, user_id: str, channel: str, cap: int) -> bool:
+        return self._notifications.check_daily_cap(user_id, channel, cap)
+
+    def check_dedup(self, dedup_key: str, window_hours: int = 1) -> bool:
+        return self._notifications.check_dedup(dedup_key, window_hours)
+
+    def enqueue_notification(
+        self,
+        user_id: str,
+        case_ref: str,
+        notification_type: str,
+        channel: str,
+        payload_json: str,
+        notification_log_id: int | None = None,
+        scheduled_at: str | None = None,
+    ) -> int:
+        return self._notifications.enqueue_notification(
+            user_id,
+            case_ref,
+            notification_type,
+            channel,
+            payload_json,
+            notification_log_id=notification_log_id,
+            scheduled_at=scheduled_at,
+        )
+
+    def claim_queued_notifications(
+        self,
+        worker_id: str,
+        batch_size: int = 20,
+        lock_seconds: int = 60,
+    ) -> list[dict]:
+        return self._notifications.claim_queued_notifications(
+            worker_id, batch_size=batch_size, lock_seconds=lock_seconds
+        )
+
+    def ack_queue_item(self, queue_id: int, success: bool, retry_after_seconds: int = 0) -> None:
+        return self._notifications.ack_queue_item(
+            queue_id, success, retry_after_seconds=retry_after_seconds
+        )
+
+    def get_alert_prefs(self, user_id: str, case_ref: str) -> list[dict]:
+        return self._notifications.get_alert_prefs(user_id, case_ref)
+
+    def upsert_alert_prefs(self, user_id: str, case_ref: str, prefs: list[dict]) -> list[dict]:
+        return self._notifications.upsert_alert_prefs(user_id, case_ref, prefs)
+
+    def get_alert_pref(self, user_id: str, case_ref: str, trigger_type: str) -> dict | None:
+        return self._notifications.get_alert_pref(user_id, case_ref, trigger_type)
+
+    def upsert_single_alert_pref(
+        self,
+        user_id: str,
+        case_ref: str,
+        trigger_type: str,
+        channel: str | None = None,
+        enabled: bool | None = None,
+        quiet_hours_start: int | None = None,
+        quiet_hours_end: int | None = None,
+    ) -> dict:
+        return self._notifications.upsert_single_alert_pref(
+            user_id,
+            case_ref,
+            trigger_type,
+            channel=channel,
+            enabled=enabled,
+            quiet_hours_start=quiet_hours_start,
+            quiet_hours_end=quiet_hours_end,
+        )
+
+    def log_search(
+        self,
+        query_type: str,
+        query_text: str,
+        result_count: int | None = None,
+        user_id: str | None = None,
+        court_source: str | None = None,
+    ) -> None:
+        return self._notifications.log_search(
+            query_type,
+            query_text,
+            result_count=result_count,
+            user_id=user_id,
+            court_source=court_source,
+        )
 
     # ── Timeline delegation ───────────────────────────────────────────────────
 

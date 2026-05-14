@@ -74,11 +74,11 @@ def normalize_phone_http(phone: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-def send_otp_msg91(phone: str, otp: str, settings: Settings) -> None:
-    """Send OTP via MSG91. Raises on HTTP error."""
+def send_otp_msg91(phone: str, otp: str, settings: Settings, *, channel: str = "sms") -> None:
+    """Send OTP via MSG91 (channel='sms' or 'whatsapp'). Raises on HTTP error."""
     if not settings.msg91_auth_key:
         log.warning("MSG91_AUTH_KEY not set — OTP not sent (dev mode, OTP logged)")
-        log.warning("DEV OTP for %s: %s", phone, otp)
+        log.warning("DEV OTP for %s [%s]: %s", phone, channel, otp)
         return
     mobile = phone.lstrip("+")
     payload = {
@@ -87,7 +87,10 @@ def send_otp_msg91(phone: str, otp: str, settings: Settings) -> None:
         "authkey": settings.msg91_auth_key,
         "otp": otp,
     }
-    resp = httpx.post("https://api.msg91.com/api/v5/otp", json=payload, timeout=10)
+    url = "https://api.msg91.com/api/v5/otp"
+    if channel == "whatsapp":
+        url += "?type=whatsapp"
+    resp = httpx.post(url, json=payload, timeout=10)
     if resp.status_code >= 400:
         log.error("MSG91 error %s: %s", resp.status_code, resp.text)
         raise HTTPException(status_code=502, detail="OTP delivery failed — try again")

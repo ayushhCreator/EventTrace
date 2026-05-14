@@ -25,6 +25,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 def start_health_server() -> None:
     port = int(os.getenv("PORT", "8080"))
+    print(f"==> Starting health server on port {port}...")
     server = HTTPServer(("0.0.0.0", port), _Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
+    print(f"==> Health server running in background thread.")

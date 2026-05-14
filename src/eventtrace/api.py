@@ -11,9 +11,11 @@ from slowapi.util import get_remote_address
 
 from .config import Settings
 from .db import get_db
+from .routes.admin import router as admin_router
 from .routes.alerts import router as alerts_router
 from .routes.auth import router as auth_router
 from .routes.causelist import router as causelist_router
+from .routes.notifications import router as notifications_router
 from .routes.display import router as display_router
 from .routes.export import router as export_router
 from .routes.health import router as health_router
@@ -77,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(matters_router)
     app.include_router(ui_router)
     app.include_router(case_search_router)
+    app.include_router(notifications_router)
+    app.include_router(admin_router)
     app.include_router(ecourts_test_router)
 
     return app

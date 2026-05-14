@@ -157,7 +157,7 @@ def _wa_creds_ok(settings: Settings) -> bool:
 
 
 def _send_wa(settings: Settings, phone: str, body: str) -> None:
-    from .whatsapp_bot import send_whatsapp_sync
+    from ..whatsapp_bot import send_whatsapp_sync
 
     send_whatsapp_sync(
         account_sid=settings.twilio_account_sid,
@@ -365,7 +365,7 @@ def _dispatch_notifications(
             if contact_type == "telegram":
                 if not sub.get("telegram_id") or not settings.telegram_token:
                     continue
-                from .telegram_bot import send_notification_sync
+                from ..telegram_bot import send_notification_sync
 
                 send_notification_sync(
                     token=settings.telegram_token,
@@ -376,7 +376,7 @@ def _dispatch_notifications(
                 if not sub.get("phone") or not _wa_creds_ok(settings):
                     log.warning("Twilio creds not set — skipping WhatsApp sub %s", sub["id"])
                     continue
-                from .whatsapp_bot import _build_alert_message
+                from ..whatsapp_bot import _build_alert_message
 
                 _send_wa(settings, sub["phone"], _build_alert_message(payload))
             else:
@@ -457,6 +457,15 @@ def main() -> None:
     vc_thread.start()
     log.info("VC scrape scheduler started")
 
+    # Start notification retry worker in background
+    from ..services.notification_retry_worker import run_retry_worker
+
+    notify_thread = threading.Thread(
+        target=run_retry_worker, args=(db,), daemon=True, name="notify-retry"
+    )
+    notify_thread.start()
+    log.info("Notification retry worker started")
+
     consecutive_failures = 0
 
     while True:
@@ -492,11 +501,13 @@ def main() -> None:
             _notify_adjournments(changes, snapshot, db, settings)  # Fix 2: adjournment
             _send_reminders(snapshot, db, settings)  # Fix 3: reminder
 
-            # Tracked-cases serial alerts
+            # Tracked-cases serial alerts + display board triggers
             try:
-                from ..services.alert_checker import check_serial_alerts
+                from ..services.alert_checker import check_serial_alerts, check_display_board_triggers
 
-                check_serial_alerts(db, list(snapshot.values()))
+                _snap_rows = list(snapshot.values())
+                check_serial_alerts(db, _snap_rows)
+                check_display_board_triggers(db, _snap_rows)
             except Exception as _ac_exc:
                 log.warning("check_serial_alerts failed: %s", _ac_exc)
 

@@ -139,6 +139,90 @@ def untrack_case(
         raise HTTPException(status_code=404, detail="Case not tracked")
 
 
+# ── Notification prefs ───────────────────────────────────────────────────────
+
+_ALL_TRIGGER_TYPES = [
+    "case_in_causelist",
+    "serial_reached",
+    "display_board_active",
+    "hearing_date_changed",
+    "order_uploaded",
+    "status_changed",
+    "judge_changed",
+]
+
+_DEFAULT_PREF = {"channel": "whatsapp", "enabled": True, "quiet_hours_start": None, "quiet_hours_end": None}
+
+
+class AlertPrefItem(BaseModel):
+    trigger_type: str
+    channel: str = "whatsapp"
+    enabled: bool = True
+    quiet_hours_start: int | None = None
+    quiet_hours_end: int | None = None
+
+
+class AlertPrefPatch(BaseModel):
+    channel: str | None = None
+    enabled: bool | None = None
+    quiet_hours_start: int | None = None
+    quiet_hours_end: int | None = None
+
+
+@router.get("/{case_ref:path}/notification-prefs")
+def get_notification_prefs(
+    case_ref: str,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> list[dict]:
+    existing = {p["trigger_type"]: p for p in db.get_alert_prefs(current_user["id"], case_ref)}
+    result = []
+    for t in _ALL_TRIGGER_TYPES:
+        if t in existing:
+            result.append(existing[t])
+        else:
+            result.append({"trigger_type": t, "user_id": current_user["id"], "case_ref": case_ref, **_DEFAULT_PREF})
+    return result
+
+
+@router.put("/{case_ref:path}/notification-prefs")
+def set_notification_prefs(
+    case_ref: str,
+    prefs: list[AlertPrefItem],
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> list[dict]:
+    valid = {p.trigger_type for p in prefs if p.trigger_type in _ALL_TRIGGER_TYPES}
+    if not valid:
+        raise HTTPException(status_code=422, detail="No valid trigger_types provided")
+    return db.upsert_alert_prefs(
+        current_user["id"],
+        case_ref,
+        [p.model_dump() for p in prefs if p.trigger_type in _ALL_TRIGGER_TYPES],
+    )
+
+
+@router.patch("/{case_ref:path}/notification-prefs/{trigger_type}")
+def patch_notification_pref(
+    case_ref: str,
+    trigger_type: str,
+    body: AlertPrefPatch,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    if trigger_type not in _ALL_TRIGGER_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unknown trigger_type: {trigger_type}")
+    return db.upsert_single_alert_pref(
+        current_user["id"],
+        case_ref,
+        trigger_type,
+        channel=body.channel,
+        enabled=body.enabled,
+        quiet_hours_start=body.quiet_hours_start,
+        quiet_hours_end=body.quiet_hours_end,
+    )
+
+
 # ── Timeline endpoint (Task 5) ────────────────────────────────────────────────
 
 timeline_router = APIRouter()

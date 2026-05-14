@@ -87,6 +87,9 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
         return False
 
 
+_MSG91_WA_NAMESPACE = "67e7d30e_07d9_45d3_9432_f8297495dbf1"
+
+
 def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
     wa_number = _msg91_whatsapp_number()
     if not wa_number:
@@ -106,16 +109,18 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
                     "messaging_product": "whatsapp",
                     "type": "template",
                     "template": {
-                        "name": "hearing_alert",
-                        "language": {"code": "en"},
-                        "components": [
+                        "name": "hearing_alert2",
+                        "language": {"code": "en", "policy": "deterministic"},
+                        "namespace": _MSG91_WA_NAMESPACE,
+                        "to_and_components": [
                             {
-                                "type": "body",
-                                "parameters": [{"type": "text", "text": message}],
+                                "to": [mobile],
+                                "components": {
+                                    "body_1": {"type": "text", "value": message}
+                                },
                             }
                         ],
                     },
-                    "to": mobile,
                 },
             },
             timeout=10,
@@ -189,15 +194,16 @@ def send_alert(
 
     wa_sent = False
     phone = user.get("phone", "")
+    whatsapp_number = user.get("whatsapp_number") or phone
 
-    if phone and prefs.get("whatsapp", True):
+    if whatsapp_number and prefs.get("whatsapp", True):
         wati_key = _wati_key()
         if wati_key:
-            wa_sent = _send_wati(phone, message, wati_key)
+            wa_sent = _send_wati(whatsapp_number, message, wati_key)
         if not wa_sent:
             msg91_key = _msg91_whatsapp_key()
             if msg91_key:
-                wa_sent = _send_msg91_whatsapp(phone, message, msg91_key)
+                wa_sent = _send_msg91_whatsapp(whatsapp_number, message, msg91_key)
 
         if not wa_sent and not wati_key and not _msg91_whatsapp_key():
             log.info("No WhatsApp provider configured — queuing notification as pending_approval")
