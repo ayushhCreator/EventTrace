@@ -76,8 +76,9 @@ def normalize_phone_http(phone: str) -> str:
 
 def send_otp_msg91(phone: str, otp: str, settings: Settings, *, channel: str = "sms") -> None:
     """Send OTP via MSG91 (channel='sms' or 'whatsapp'). Raises on HTTP error."""
-    if not settings.msg91_auth_key:
-        log.warning("MSG91_AUTH_KEY not set — OTP not sent (dev mode, OTP logged)")
+    if not settings.msg91_auth_key or not settings.msg91_template_id:
+        log.warning("MSG91 not fully configured (auth_key=%s template_id=%s) — OTP logged only",
+                    bool(settings.msg91_auth_key), bool(settings.msg91_template_id))
         log.warning("DEV OTP for %s [%s]: %s", phone, channel, otp)
         return
     mobile = phone.lstrip("+")

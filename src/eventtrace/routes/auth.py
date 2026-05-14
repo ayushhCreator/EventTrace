@@ -92,7 +92,7 @@ def send_otp(
     db.save_otp(phone, otp_hash, expires_at)
     auth_svc.send_otp_msg91(phone, otp, settings)
 
-    dev = not settings.msg91_auth_key
+    dev = not settings.msg91_auth_key or not settings.msg91_template_id
     payload: dict = {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
     if dev:
         payload["dev_otp"] = otp
