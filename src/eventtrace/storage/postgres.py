@@ -321,6 +321,9 @@ class PostgresDB:
     def get_user_by_id(self, user_id: str) -> dict | None:
         return self._auth.get_user_by_id(user_id)
 
+    def get_user_by_email(self, email: str) -> dict | None:
+        return self._auth.get_user_by_email(email)
+
     def upsert_user(
         self,
         phone: str,

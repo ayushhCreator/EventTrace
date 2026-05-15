@@ -97,6 +97,13 @@ class SQLAlchemyAuthRepository:
             user = session.get(User, user_id)
             return _user_to_dict(user) if user else None
 
+    def get_user_by_email(self, email: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.scalar(
+                select(User).where(User.email == email.strip().lower(), User.email_verified == 1)
+            )
+            return _user_to_dict(user) if user else None
+
     def upsert_user(
         self,
         phone: str,

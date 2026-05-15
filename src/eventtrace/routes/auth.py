@@ -244,6 +244,11 @@ def send_email_otp(
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise HTTPException(status_code=422, detail="Invalid email address")
 
+    # Reject if this email is already verified by a different account
+    existing_owner = db.get_user_by_email(email)
+    if existing_owner and str(existing_owner["id"]) != str(current_user["id"]):
+        raise HTTPException(status_code=409, detail="This email is already linked to another account")
+
     # Rate-limit: reuse phone OTP rate-limit logic (checks created_at < 60s ago)
     existing = db.get_latest_email_otp(email)
     if auth_svc.otp_rate_limited(existing):

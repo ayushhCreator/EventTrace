@@ -88,6 +88,7 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
 
 
 _MSG91_WA_NAMESPACE = "67e7d30e_07d9_45d3_9432_f8297495dbf1"
+_MSG91_WA_TEMPLATE = "court_update"
 
 
 def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
@@ -99,6 +100,9 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
         import httpx
 
         mobile = phone.lstrip("+")
+        if os.getenv("MSG91_DRY_RUN"):
+            log.warning("[DRY-RUN] MSG91 WhatsApp → to=%s integrated=%s template=%s body=%r", mobile, wa_number, _MSG91_WA_TEMPLATE, message)
+            return True
         resp = httpx.post(
             "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
             headers={"authkey": auth_key, "Content-Type": "application/json"},
@@ -109,7 +113,7 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
                     "messaging_product": "whatsapp",
                     "type": "template",
                     "template": {
-                        "name": "hearing_alert2",
+                        "name": _MSG91_WA_TEMPLATE,
                         "language": {"code": "en", "policy": "deterministic"},
                         "namespace": _MSG91_WA_NAMESPACE,
                         "to_and_components": [
@@ -257,13 +261,167 @@ def send_alert(
     email = user.get("email", "")
     if email and user.get("email_verified") and prefs.get("email", True):
         subject = _email_subject(alert_type, context, case_ref)
-        body_html = f"<p>{message}</p>"
+        body_html = build_email_html(alert_type, {**context, "case_ref": case_ref}, case_ref)
         send_email_alert(email, subject, body_html)
 
 
 def _email_subject(alert_type: str, context: dict, case_ref: str) -> str:
     if alert_type == "serial_reached":
-        return f"[SuperSahayak Legal] Court {context.get('court_no')} — Serial Alert for {case_ref}"
+        return f"SuperSahayak Legal — Court {context.get('court_no')} serial alert for {case_ref}"
     if alert_type == "case_in_causelist":
-        return f"[SuperSahayak Legal] {case_ref} listed for {context.get('date', '')}"
-    return f"[SuperSahayak Legal] Update for {case_ref}"
+        date = context.get("date", "")
+        court = context.get("court_no", "")
+        court_str = f"Court {court} — " if court else ""
+        return f"SuperSahayak Legal — {court_str}{case_ref} listed for {date}"
+    if alert_type == "display_board_active":
+        return f"SuperSahayak Legal — {case_ref} is on the live display board"
+    if alert_type == "hearing_date_changed":
+        return f"SuperSahayak Legal — Hearing date changed for {case_ref}"
+    if alert_type == "vc_link_available":
+        return f"SuperSahayak Legal — VC link ready for {case_ref}"
+    if alert_type == "causelist_released":
+        return f"SuperSahayak Legal — Tomorrow's cause list is out"
+    return f"SuperSahayak Legal — Update for {case_ref}"
+
+
+_EMAIL_WRAPPER = """\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:24px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%%;">
+  <tr><td style="background:#1a1a2e;padding:20px 32px;">
+    <span style="color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:0.5px;">SuperSahayak Legal</span>
+  </td></tr>
+  <tr><td style="padding:32px;">
+    {body}
+  </td></tr>
+  <tr><td style="background:#f8f8f8;padding:16px 32px;border-top:1px solid #e8e8e8;">
+    <p style="margin:0;font-size:12px;color:#888;">You're receiving this because you track cases on SuperSahayak Legal.</p>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
+def _kv_row(label: str, value: str) -> str:
+    return (
+        f'<tr><td style="padding:4px 0;color:#666;font-size:13px;width:130px;vertical-align:top;">{label}</td>'
+        f'<td style="padding:4px 0;color:#1a1a2e;font-size:13px;font-weight:600;">{value}</td></tr>'
+    )
+
+
+def build_email_html(trigger_type: str, context: dict, case_ref: str) -> str:
+    if trigger_type == "case_in_causelist":
+        date = context.get("date", "")
+        court = context.get("court_no", "")
+        serial = context.get("serial_no", "")
+        bench = context.get("bench_label", "")
+        section = context.get("section", "")
+        vc_link = context.get("vc_link", "")
+
+        rows = ""
+        if court:
+            rows += _kv_row("Court", str(court))
+        if serial:
+            rows += _kv_row("Serial #", str(serial))
+        if bench:
+            rows += _kv_row("Bench", bench)
+        if section:
+            rows += _kv_row("Section", section)
+        if date:
+            rows += _kv_row("Hearing date", date)
+
+        vc_html = ""
+        if vc_link:
+            vc_html = (
+                f'<p style="margin:20px 0 0;"><a href="{vc_link}" '
+                f'style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">Join VC</a></p>'
+            )
+
+        body = (
+            f'<h2 style="margin:0 0 8px;color:#1a1a2e;font-size:20px;">📋 Case Listed</h2>'
+            f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
+            f'<strong>{case_ref}</strong> is listed for hearing on <strong>{date}</strong>.</p>'
+            f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
+            f'{rows}</table>{vc_html}'
+        )
+
+    elif trigger_type == "serial_reached":
+        court = context.get("court_no", "")
+        current = context.get("current_serial", "")
+        alert = context.get("alert_serial", "")
+        date = context.get("date", "")
+        rows = _kv_row("Court", str(court)) if court else ""
+        rows += _kv_row("Board at serial", str(current)) if current else ""
+        rows += _kv_row("Your case serial", str(alert)) if alert else ""
+        rows += _kv_row("Date", date) if date else ""
+        body = (
+            f'<h2 style="margin:0 0 8px;color:#b45309;font-size:20px;">⚡ Case Coming Up Soon</h2>'
+            f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
+            f'<strong>{case_ref}</strong> is approaching on the display board.</p>'
+            f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
+            f'{rows}</table>'
+        )
+
+    elif trigger_type == "display_board_active":
+        court = context.get("court_no", "")
+        serial = context.get("serial_no", "")
+        status = context.get("status", "")
+        rows = _kv_row("Court", str(court)) if court else ""
+        rows += _kv_row("Serial #", str(serial)) if serial else ""
+        rows += _kv_row("Status", status) if status else ""
+        body = (
+            f'<h2 style="margin:0 0 8px;color:#16a34a;font-size:20px;">🟢 On Live Display Board</h2>'
+            f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
+            f'<strong>{case_ref}</strong> has appeared on the live court display board.</p>'
+            f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
+            f'{rows}</table>'
+        )
+
+    elif trigger_type == "hearing_date_changed":
+        old_date = context.get("old_date", "?")
+        new_date = context.get("new_date", "?")
+        body = (
+            f'<h2 style="margin:0 0 8px;color:#7c3aed;font-size:20px;">📅 Hearing Date Changed</h2>'
+            f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
+            f'The next hearing date for <strong>{case_ref}</strong> has changed.</p>'
+            f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
+            f'{_kv_row("Old date", old_date)}'
+            f'{_kv_row("New date", f"<strong>{new_date}</strong>")}'
+            f'</table>'
+        )
+
+    elif trigger_type == "vc_link_available":
+        vc_link = context.get("vc_link", "")
+        court = context.get("court_no", "")
+        date = context.get("date", "")
+        rows = _kv_row("Court", str(court)) if court else ""
+        rows += _kv_row("Date", date) if date else ""
+        vc_html = ""
+        if vc_link:
+            vc_html = (
+                f'<p style="margin:20px 0 0;"><a href="{vc_link}" '
+                f'style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">Join VC</a></p>'
+            )
+        body = (
+            f'<h2 style="margin:0 0 8px;color:#0369a1;font-size:20px;">🔗 VC Link Ready</h2>'
+            f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
+            f'A video conferencing link is now available for <strong>{case_ref}</strong>.</p>'
+            f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
+            f'{rows}</table>{vc_html}'
+        )
+
+    else:
+        # Generic fallback
+        from .notification_dispatch import build_message
+        plain = build_message(trigger_type, {**context, "case_ref": case_ref})
+        lines = plain.replace("\n", "<br>")
+        body = (
+            f'<h2 style="margin:0 0 16px;color:#1a1a2e;font-size:18px;">Update for {case_ref}</h2>'
+            f'<p style="color:#444;font-size:14px;line-height:1.6;">{lines}</p>'
+        )
+
+    return _EMAIL_WRAPPER.format(body=body)

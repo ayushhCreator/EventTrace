@@ -20,6 +20,7 @@ from .notifications import (
     _msg91_whatsapp_key,
     send_email_alert,
     _email_subject,
+    build_email_html,
 )
 
 log = structlog.get_logger()
@@ -97,7 +98,7 @@ def _dispatch_queue_item(db: Any, item: dict) -> bool:
         trigger_type = payload.get("trigger_type", "")
         case_ref = payload.get("case_ref", "")
         subject = _email_subject(trigger_type, payload, case_ref)
-        body_html = f"<p>{message.replace(chr(10), '<br>')}</p>"
+        body_html = build_email_html(trigger_type, payload, case_ref)
         sent = send_email_alert(email, subject, body_html)
         provider_response = json.dumps({"sent": sent, "provider": "resend"})
 
