@@ -469,3 +469,134 @@ class Matter(Base):
         Index("idx_matter_case_ref", "case_ref"),
         Index("idx_matter_status", "user_id", "status"),
     )
+
+
+class OperationalRule(Base):
+    """Structured operational rules extracted from bench NOTE: blocks.
+
+    Populated atomically with each causelist_bench write. One bench may produce
+    multiple rows (one per day for DAY_ORDER, one per raw note for RAW_NOTE).
+    """
+    __tablename__ = "operational_rule"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    bench_id = Column(
+        BigInteger, ForeignKey("causelist_bench.id", ondelete="CASCADE"), nullable=False
+    )
+    rule_type = Column(String, nullable=False)
+    day_of_week = Column(String, nullable=True)
+    category_order_json = Column(Text, nullable=True)
+    time_value = Column(String, nullable=True)
+    raw_note = Column(Text, nullable=True)
+    note_index = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("idx_op_rule_bench", "bench_id"),
+        Index("idx_op_rule_type", "rule_type"),
+        Index("idx_op_rule_day", "day_of_week"),
+    )
+
+
+class Court(Base):
+    """Master list of high courts. Pre-seeded by migration 0013."""
+    __tablename__ = "court"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    jurisdiction_state = Column(String, nullable=True)
+    seat_city = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)
+
+
+class Judge(Base):
+    """Canonical judge per court. Dedupes on (court_id, normalized_name)."""
+    __tablename__ = "judge"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    court_id = Column(String, ForeignKey("court.id", ondelete="RESTRICT"), nullable=False)
+    normalized_name = Column(String, nullable=False)
+    full_name = Column(String, nullable=False)
+    designation = Column(String, nullable=True)
+    first_seen_at = Column(String, nullable=False)
+    last_seen_at = Column(String, nullable=False)
+    active = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint("court_id", "normalized_name", name="uq_judge_court_name"),
+        Index("idx_judge_court", "court_id"),
+        Index("idx_judge_norm", "normalized_name"),
+    )
+
+
+class Advocate(Base):
+    """Canonical advocate. Dedupes on normalized_name."""
+    __tablename__ = "advocate"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    normalized_name = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    bar_enrollment_no = Column(String, nullable=True)
+    first_seen_at = Column(String, nullable=False)
+    last_seen_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("normalized_name", name="uq_advocate_name"),
+        Index("idx_advocate_norm", "normalized_name"),
+        Index("idx_advocate_bar", "bar_enrollment_no"),
+    )
+
+
+class CauselistBenchJudge(Base):
+    __tablename__ = "causelist_bench_judge"
+
+    bench_id = Column(
+        BigInteger, ForeignKey("causelist_bench.id", ondelete="CASCADE"), primary_key=True
+    )
+    judge_id = Column(
+        BigInteger, ForeignKey("judge.id", ondelete="RESTRICT"), primary_key=True
+    )
+    order_index = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("idx_bench_judge_bench", "bench_id"),
+        Index("idx_bench_judge_judge", "judge_id"),
+    )
+
+
+class CauselistCaseAdvocate(Base):
+    __tablename__ = "causelist_case_advocate"
+
+    case_id = Column(
+        BigInteger, ForeignKey("causelist_case.id", ondelete="CASCADE"), primary_key=True
+    )
+    advocate_id = Column(
+        BigInteger, ForeignKey("advocate.id", ondelete="RESTRICT"), primary_key=True
+    )
+    role = Column(String, primary_key=True, default="UNKNOWN")
+
+    __table_args__ = (
+        Index("idx_case_advocate_case", "case_id"),
+        Index("idx_case_advocate_advocate", "advocate_id"),
+    )
+
+
+class EcourtsCaseTypeMap(Base):
+    """Cached mapping: (state_cd, court_code, type_id) ↔ prefix.
+
+    type_id and type_name come from eCourts fillCaseType (no CAPTCHA).
+    prefix is learned lazily from actual search results.
+    """
+    __tablename__ = "ecourts_case_type_map"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    state_cd = Column(Text, nullable=False)
+    court_code = Column(Text, nullable=False)
+    type_id = Column(Text, nullable=False)
+    type_name = Column(Text, nullable=False)
+    prefix = Column(Text, nullable=True)
+    fetched_at = Column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("state_cd", "court_code", "type_id", name="uq_ecourts_type"),
+        Index("idx_ecourts_type_prefix", "state_cd", "court_code", "prefix"),
+    )

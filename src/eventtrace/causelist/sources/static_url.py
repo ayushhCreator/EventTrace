@@ -23,7 +23,7 @@ log = structlog.get_logger()
 
 _BASE = "https://calcuttahighcourt.gov.in/downloads/old_cause_lists"
 
-Schedule = Literal["daily", "monthly"]
+Schedule = Literal["daily", "monthly", "supplementary", "lok_adalat"]
 
 
 @dataclass(frozen=True)
@@ -42,8 +42,7 @@ class UrlConfig:
         """Whether this source should even be attempted for the given target date.
 
         Monthly lists are only published in the first 7 days of the month.
-        We don't need to know the exact court holiday calendar — we probe all
-        weekdays in that window until we find the file.
+        Supplementary / lok adalat can appear on any court working day.
         """
         if self.schedule == "monthly":
             return target_date.day <= 7
@@ -81,6 +80,23 @@ ORIGINAL_MONTHLY = UrlConfig(
     source_id="original_monthly",
     schedule="monthly",
 )
+
+# Supplementary lists — published ad-hoc when benches are added/changed.
+# URL: /supplementary{N}/AS/  or /supplementary{N}/OS/  (N="" for first).
+# The court website shows up to 5 supplementary slots per side per day.
+APPELLATE_SUPP_1 = UrlConfig(path="supplementary/AS",  prefix="cla", side="APPELLATE SIDE", list_type="SUPPLEMENTARY_1", source_id="appellate_supp_1", schedule="supplementary")
+APPELLATE_SUPP_2 = UrlConfig(path="supplementary2/AS", prefix="cla", side="APPELLATE SIDE", list_type="SUPPLEMENTARY_2", source_id="appellate_supp_2", schedule="supplementary")
+APPELLATE_SUPP_3 = UrlConfig(path="supplementary3/AS", prefix="cla", side="APPELLATE SIDE", list_type="SUPPLEMENTARY_3", source_id="appellate_supp_3", schedule="supplementary")
+APPELLATE_SUPP_4 = UrlConfig(path="supplementary4/AS", prefix="cla", side="APPELLATE SIDE", list_type="SUPPLEMENTARY_4", source_id="appellate_supp_4", schedule="supplementary")
+APPELLATE_SUPP_5 = UrlConfig(path="supplementary5/AS", prefix="cla", side="APPELLATE SIDE", list_type="SUPPLEMENTARY_5", source_id="appellate_supp_5", schedule="supplementary")
+ORIGINAL_SUPP_1  = UrlConfig(path="supplementary/OS",  prefix="cl",  side="ORIGINAL SIDE",  list_type="SUPPLEMENTARY_1", source_id="original_supp_1",  schedule="supplementary")
+ORIGINAL_SUPP_2  = UrlConfig(path="supplementary2/OS", prefix="cl",  side="ORIGINAL SIDE",  list_type="SUPPLEMENTARY_2", source_id="original_supp_2",  schedule="supplementary")
+ORIGINAL_SUPP_3  = UrlConfig(path="supplementary3/OS", prefix="cl",  side="ORIGINAL SIDE",  list_type="SUPPLEMENTARY_3", source_id="original_supp_3",  schedule="supplementary")
+ORIGINAL_SUPP_4  = UrlConfig(path="supplementary4/OS", prefix="cl",  side="ORIGINAL SIDE",  list_type="SUPPLEMENTARY_4", source_id="original_supp_4",  schedule="supplementary")
+ORIGINAL_SUPP_5  = UrlConfig(path="supplementary5/OS", prefix="cl",  side="ORIGINAL SIDE",  list_type="SUPPLEMENTARY_5", source_id="original_supp_5",  schedule="supplementary")
+
+APPELLATE_LOK_ADALAT = UrlConfig(path="lok_adalat/AS", prefix="cla", side="APPELLATE SIDE", list_type="LOK_ADALAT", source_id="appellate_lok_adalat", schedule="lok_adalat")
+ORIGINAL_LOK_ADALAT  = UrlConfig(path="lok_adalat/OS", prefix="cl",  side="ORIGINAL SIDE",  list_type="LOK_ADALAT", source_id="original_lok_adalat",  schedule="lok_adalat")
 
 
 class StaticUrlSource(CauseListSource):

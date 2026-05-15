@@ -265,6 +265,15 @@ class DB:
     def list_causelist_prefixes(self) -> list[str]:
         return self._causelist.list_causelist_prefixes()
 
+    def list_available_list_types(self, list_date: str) -> list[dict]:
+        return self._causelist.list_available_list_types(list_date)
+
+    def list_bench_rules(self, bench_id: int) -> list[dict]:
+        return self._causelist.list_bench_rules(bench_id)
+
+    def list_judges_for_date(self, list_date: str, side: str | None = None) -> list[dict]:
+        return self._causelist.list_judges_for_date(list_date, side)
+
     def store_causelist(
         self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None
     ) -> int:
@@ -532,6 +541,20 @@ class DB:
                 (user_id, case_ref),
             ).fetchone()
             return dict(row) if row else None
+
+    def update_tracked_case(self, user_id: str, case_ref: str, updates: dict) -> bool:
+        allowed = {"cino", "case_type_id", "state_cd", "court_code", "case_no", "case_year",
+                   "bench_label", "judges_json", "court_no", "petitioner", "respondent"}
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return False
+        set_clause = ", ".join(f"{k}=?" for k in fields)
+        with self.connect() as con:
+            cur = con.execute(
+                f"UPDATE tracked_cases SET {set_clause} WHERE user_id=? AND case_ref=?",
+                (*fields.values(), user_id, case_ref),
+            )
+            return cur.rowcount > 0
 
     def remove_tracked_case(self, user_id: str, case_ref: str) -> bool:
         with self.connect() as con:
@@ -814,3 +837,60 @@ class DB:
 
     def has_causelist_alert_today(self, user_id: str, case_ref: str, event_date: str) -> bool:
         return self._timeline.has_causelist_alert_today(user_id, case_ref, event_date)
+
+    # ── eCourts case type map ─────────────────────────────────────────────────
+
+    def upsert_ecourts_type(
+        self, state_cd: str, court_code: str, type_id: str, type_name: str,
+        prefix: str | None = None,
+    ) -> None:
+        from datetime import datetime as _dt
+        now = _dt.utcnow().isoformat()
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO ecourts_case_type_map
+                  (state_cd, court_code, type_id, type_name, prefix, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (state_cd, court_code, type_id) DO UPDATE SET
+                  type_name  = excluded.type_name,
+                  prefix     = COALESCE(excluded.prefix, ecourts_case_type_map.prefix),
+                  fetched_at = excluded.fetched_at
+                """,
+                (state_cd, court_code, type_id, type_name, prefix, now),
+            )
+
+    def set_ecourts_type_prefix(
+        self, state_cd: str, court_code: str, type_id: str, prefix: str
+    ) -> None:
+        with self.connect() as con:
+            con.execute(
+                "UPDATE ecourts_case_type_map SET prefix=? WHERE state_cd=? AND court_code=? AND type_id=?",
+                (prefix, state_cd, court_code, type_id),
+            )
+
+    def get_ecourts_type_id(
+        self, state_cd: str, court_code: str, prefix: str
+    ) -> str | None:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT type_id FROM ecourts_case_type_map WHERE state_cd=? AND court_code=? AND UPPER(prefix)=UPPER(?) LIMIT 1",
+                (state_cd, court_code, prefix),
+            ).fetchone()
+            return row["type_id"] if row else None
+
+    def list_ecourts_types(self, state_cd: str, court_code: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT type_id, type_name, prefix FROM ecourts_case_type_map WHERE state_cd=? AND court_code=? ORDER BY type_id",
+                (state_cd, court_code),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def ecourts_types_populated(self, state_cd: str, court_code: str) -> bool:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT 1 FROM ecourts_case_type_map WHERE state_cd=? AND court_code=? LIMIT 1",
+                (state_cd, court_code),
+            ).fetchone()
+            return row is not None

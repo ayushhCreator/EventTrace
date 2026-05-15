@@ -308,10 +308,25 @@ class PostgresDB:
     def list_causelist_prefixes(self) -> list[str]:
         return self._causelist.list_causelist_prefixes()
 
+    def list_available_list_types(self, list_date: str) -> list[dict]:
+        return self._causelist.list_available_list_types(list_date)
+
+    def list_bench_rules(self, bench_id: int) -> list[dict]:
+        return self._causelist.list_bench_rules(bench_id)
+
+    def list_judges_for_date(self, list_date: str, side: str | None = None) -> list[dict]:
+        return self._causelist.list_judges_for_date(list_date, side)
+
     def store_causelist(
         self, parsed: list[dict[str, Any]], scraped_at: datetime | None = None
     ) -> int:
         return self._causelist.store_causelist(parsed, scraped_at)
+
+    def get_bench_by_id(self, bench_id: int) -> dict[str, Any] | None:
+        return self._causelist.get_bench_by_id(bench_id)
+
+    def list_cases_by_bench_id(self, bench_id: int) -> list[dict[str, Any]]:
+        return self._causelist.list_cases_by_bench_id(bench_id)
 
     # ── Auth delegation ──────────────────────────────────────────────────────
 
@@ -592,6 +607,20 @@ class PostgresDB:
             )
             row = cur.fetchone()
             return dict(row) if row else None
+
+    def update_tracked_case(self, user_id: str, case_ref: str, updates: dict) -> bool:
+        allowed = {"cino", "case_type_id", "state_cd", "court_code", "case_no", "case_year",
+                   "bench_label", "judges_json", "court_no", "petitioner", "respondent"}
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return False
+        set_clause = ", ".join(f"{k}=%s" for k in fields)
+        with self._cursor() as cur:
+            cur.execute(
+                f"UPDATE tracked_cases SET {set_clause} WHERE user_id=%s AND case_ref=%s",
+                (*fields.values(), user_id, case_ref),
+            )
+            return cur.rowcount > 0
 
     def remove_tracked_case(self, user_id: str, case_ref: str) -> bool:
         with self._cursor() as cur:
@@ -989,3 +1018,62 @@ class PostgresDB:
                 (matter_id, user_id),
             )
             return cur.rowcount > 0
+
+    # ── eCourts case type map ─────────────────────────────────────────────────
+
+    def upsert_ecourts_type(
+        self, state_cd: str, court_code: str, type_id: str, type_name: str,
+        prefix: str | None = None,
+    ) -> None:
+        now = __import__("datetime").datetime.utcnow().isoformat()
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ecourts_case_type_map
+                  (state_cd, court_code, type_id, type_name, prefix, fetched_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (state_cd, court_code, type_id) DO UPDATE SET
+                  type_name = EXCLUDED.type_name,
+                  prefix    = COALESCE(EXCLUDED.prefix, ecourts_case_type_map.prefix),
+                  fetched_at = EXCLUDED.fetched_at
+                """,
+                (state_cd, court_code, type_id, type_name, prefix, now),
+            )
+
+    def set_ecourts_type_prefix(
+        self, state_cd: str, court_code: str, type_id: str, prefix: str
+    ) -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                "UPDATE ecourts_case_type_map SET prefix=%s WHERE state_cd=%s AND court_code=%s AND type_id=%s",
+                (prefix, state_cd, court_code, type_id),
+            )
+
+    def get_ecourts_type_id(
+        self, state_cd: str, court_code: str, prefix: str
+    ) -> str | None:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT type_id FROM ecourts_case_type_map WHERE state_cd=%s AND court_code=%s AND UPPER(prefix)=UPPER(%s) LIMIT 1",
+                (state_cd, court_code, prefix),
+            )
+            row = cur.fetchone()
+            return row["type_id"] if row else None
+
+    def list_ecourts_types(
+        self, state_cd: str, court_code: str
+    ) -> list[dict]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT type_id, type_name, prefix FROM ecourts_case_type_map WHERE state_cd=%s AND court_code=%s ORDER BY type_id",
+                (state_cd, court_code),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def ecourts_types_populated(self, state_cd: str, court_code: str) -> bool:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM ecourts_case_type_map WHERE state_cd=%s AND court_code=%s LIMIT 1",
+                (state_cd, court_code),
+            )
+            return cur.fetchone() is not None

@@ -24,8 +24,9 @@ scratch/
 DEPLOY.md
 AGENTS.md
 18_VPS_CHEATSHEET.md
-docs/gcp_docs/
 graphify-out/
 logs/
 *.log
 i/
+docs/mandated/
+docs/

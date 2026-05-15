@@ -267,14 +267,16 @@ def _do_case_history(
         if not results:
             raise ValueError("Case not found in search results")
 
-        # Pick result matching target_cino (or first result)
+        # Pick result matching target_cino (or first result if cino unknown)
         match = next(
-            (r for r in results if r.get("cnr") == target_cino.upper()),
+            (r for r in results if target_cino and r.get("cnr") == target_cino.upper()),
             results[0],
         )
         internal_case_no = match["internal_id"]
         token = match.get("token", "")
         court_code_r = match.get("court_no") or court_code
+        # Use discovered cino if caller didn't have one
+        effective_cino = target_cino.upper() if target_cino else (match.get("cnr") or "")
 
         if not internal_case_no or not token:
             raise ValueError("Search result missing internal ID or token")
@@ -288,7 +290,7 @@ def _do_case_history(
                     "state_code": state_cd,
                     "dist_code": "1",
                     "case_no": internal_case_no,
-                    "cino": target_cino.upper(),
+                    "cino": effective_cino,
                     "token": token,
                     "appFlag": "",
                 },
@@ -300,7 +302,10 @@ def _do_case_history(
 
         hist_raw = hist_resp.text
         log.debug("case_history o_civil len=%d", len(hist_raw))
-        result = _parse_case_history(hist_raw, target_cino.upper())
+        result = _parse_case_history(hist_raw, effective_cino)
+        # Surface discovered cino so callers can persist it
+        if not result.get("cino") and effective_cino:
+            result["cino"] = effective_cino
 
         # Fetch order PDFs in same session (session cookies still valid)
         for order in result.get("orders", []):

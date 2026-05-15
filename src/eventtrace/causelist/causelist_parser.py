@@ -149,7 +149,8 @@ def html_to_text(html: str) -> str:
 # ── Split into per-court blocks ───────────────────────────────────────────────
 
 _COURT_SPLIT_RE = re.compile(
-    r"(?=(?:^|\n)\s*COURT\s+NO[\.\s:]*\s*\d+)", re.IGNORECASE | re.MULTILINE
+    r"(?=(?:^|\n)\s*(?:COURT\s+NO[\.\s:]*\s*\d+|WARNING\s+CAUSELIST\b))",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -350,9 +351,36 @@ def _extract_jurisdiction_groups(jurisdiction_text: str | None) -> list[str]:
     return groups
 
 
+_WARNING_CAUSELIST_RE = re.compile(r"WARNING\s+CAUSELIST", re.IGNORECASE)
+
+
 def parse_court_header(block: str) -> dict[str, Any]:
     clean_block = block.replace("\xa0", " ")
-    
+
+    # WARNING CAUSELIST — separate section at end of main causelist with "COURT NO. ."
+    if _WARNING_CAUSELIST_RE.search(clean_block):
+        judges = [_clean(m.group(1)) for m in _JUDGE_RE.finditer(clean_block) if m.group(1).strip()]
+        sched = parse_scheduling_notes(clean_block)
+        return {
+            "court_no": "W",
+            "bench_label": "WARNING LIST",
+            "side": _canonical_side(_first_group(_SIDE_RE, clean_block[:600], 0)),
+            "list_type": (_first_group(_LIST_TYPE_RE, clean_block, 1) or "DAILY").upper(),
+            "list_date": _parse_date_from_block(clean_block),
+            "judges": judges,
+            "not_sitting": False,
+            "vc_link": _first_group(_VC_LINK_RE, clean_block),
+            "jurisdiction_notes": None,
+            "at_time": "",
+            "floor": None,
+            "building": None,
+            "bench_id": None,
+            "scheduling_notes_json": sched,
+            "hearing_start_time": sched.get("hearing_start_time"),
+            "mentioning_allowed": sched.get("mentioning_allowed", False),
+            "jurisdiction_groups": [],
+        }
+
     # Detect side ONLY in the header portion (before judges/notes)
     # to avoid false positives from jurisdictional notes mentioning other sides.
     header_end = clean_block.find("HON'BLE")
@@ -361,12 +389,12 @@ def parse_court_header(block: str) -> dict[str, Any]:
     if header_end == -1:
         header_end = 500 # fallback
     header_chunk = clean_block[:header_end]
-    
+
     judges = [_clean(m.group(1)) for m in _JUDGE_RE.finditer(clean_block) if m.group(1).strip()]
     jurisdiction_notes = _extract_jurisdiction(clean_block)
     sched = parse_scheduling_notes(clean_block)
     jur_groups = _extract_jurisdiction_groups(jurisdiction_notes)
-    
+
     return {
         "court_no": _first_group(_COURT_NO_RE, clean_block),
         "bench_label": _clean(_first_group(_BENCH_RE, clean_block, 1)),
@@ -398,6 +426,20 @@ _IA_RE = re.compile(r"^IA\s+NO\s*:\s*([A-Z]+(?:\([A-Z]+\))?/\d+/\d{4})", re.IGNO
 _SUBSEC_RE = re.compile(r"^\(([A-Z][A-Z\s\-IX/&\.]+)\)\s*$")
 # All-caps line = section header candidate
 _ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z\s\-\(\)/&\.0-9]+$")
+# Known section/category keywords. An all-caps line must contain at least one
+# of these to count as a section header. Prevents OS advocate names (e.g.
+# "ARJUN RAY MUKHERJEE") from being misclassified as section headers when
+# a case has both petitioner and respondent advocate lines.
+_SECTION_KEYWORD_RE = re.compile(
+    r"\b(?:"
+    r"PIL|PUBLIC\s+INTEREST|TRIBUNAL|MOTION|HEARING|APPEAL|APPLICATION|"
+    r"MENTIONING|SUPPLEMENTARY|CONTEMPT|REVIEW|DISMISSAL|JUDGMENT|JUDGEMENT|"
+    r"POLICE|INACTION|GROUP|WP\.CT|WARNING|OLD\s+CONTEMPT|FRESH|ADJOURNED|"
+    r"FOR\s+ORDERS?|FOR\s+JUDGMENT|FOR\s+HEARING|FOR\s+DISMISSAL|FOR\s+ADMISSION|"
+    r"INTERLOCUTORY|DAILY|MONTHLY|CAUSELIST|LOK\s+ADALAT"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize_section_header(line: str) -> str | None:
@@ -712,7 +754,16 @@ def parse_cases_from_block(block: str) -> list[dict[str, Any]]:
         # Section headers usually appear between cases, but some lists insert
         # them immediately after the last line of a case. Treat such a header
         # as a boundary and flush the current case first.
-        if _ALL_CAPS_RE.match(line) and line != "VS" and len(line) < 100 and not _CASE_REF_RE.match(line):
+        # Gatekeeper: all-caps alone isn't enough — must also contain a known
+        # section keyword. OS layout has two advocate lines per case (pet+resp);
+        # the second advocate name would otherwise pollute the next case's section.
+        if (
+            _ALL_CAPS_RE.match(line)
+            and line != "VS"
+            and len(line) < 100
+            and not _CASE_REF_RE.match(line)
+            and _SECTION_KEYWORD_RE.search(line)
+        ):
             if serial is not None and case_ref is not None and advocate is not None:
                 _flush()
             if serial is None:

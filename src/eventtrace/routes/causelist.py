@@ -94,6 +94,41 @@ def causelist_search(
     return results
 
 
+@router.get("/{list_date}/available-types")
+def causelist_available_types(
+    list_date: str,
+    db: Any = Depends(get_db),
+) -> list[dict]:
+    """Which (side, list_type) combos have data for a date. Used for supplementary badges."""
+    if not _DATE_RE.match(list_date):
+        raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+    return db.list_available_list_types(list_date)
+
+
+@router.get("/{list_date}/judges")
+def causelist_judges(
+    list_date: str,
+    side: str | None = Query(None),
+    db: Any = Depends(get_db),
+) -> list[dict]:
+    """Distinct judges sitting on a date (from canonical judge table)."""
+    if not _DATE_RE.match(list_date):
+        raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+    return db.list_judges_for_date(list_date, side=side)
+
+
+@router.get("/{list_date}/bench/{bench_id}/rules")
+def causelist_bench_rules(
+    list_date: str,
+    bench_id: int,
+    db: Any = Depends(get_db),
+) -> list[dict]:
+    """Operational rules (day_order, notes, times) for one bench."""
+    if not _DATE_RE.match(list_date):
+        raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+    return db.list_bench_rules(bench_id)
+
+
 @router.get("/{list_date}")
 def causelist_summary(
     list_date: str,
@@ -105,6 +140,21 @@ def causelist_summary(
     if not _DATE_RE.match(list_date):
         raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
     return db.list_causelist_benches(list_date, side=side, list_type=list_type, source_id=source_id)
+
+
+@router.get("/{list_date}/bench/{bench_id}")
+def causelist_bench_by_id(
+    list_date: str,
+    bench_id: int,
+    db: Any = Depends(get_db),
+) -> dict:
+    if not _DATE_RE.match(list_date):
+        raise HTTPException(status_code=422, detail="list_date must be YYYY-MM-DD")
+    bench = db.get_bench_by_id(bench_id)
+    if not bench:
+        raise HTTPException(status_code=404, detail="Bench not found")
+    cases = db.list_cases_by_bench_id(bench_id)
+    return {"bench": bench, "cases": cases}
 
 
 @router.get("/{list_date}/court/{court_no}")

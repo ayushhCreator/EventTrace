@@ -148,17 +148,59 @@ def fetch_ecourts(
     case_no = (case.get("case_no") or "").strip()
     case_year = str(case.get("case_year") or "").strip()
 
-    if not all([cino, state_cd, court_code, case_type_id, case_no, case_year]):
+    # Fallback: derive missing params from case_ref for legacy tracked cases
+    # case_ref format: PREFIX/NUMBER/YEAR  e.g. "CO/4068/2025"
+    if not case_no or not case_year:
+        ref_parts = case_ref.split("/")
+        if len(ref_parts) >= 3:
+            case_no = case_no or ref_parts[-2]
+            case_year = case_year or ref_parts[-1]
+    if not state_cd:
+        state_cd = "16"  # Calcutta HC
+    if not court_code:
+        # Derive from bench_label or source_id stored on tracked case
+        bench_label = (case.get("bench_label") or "").upper()
+        source_id = (case.get("source_id") or "").lower()
+        if "original" in bench_label or "original" in source_id:
+            court_code = "1"
+        else:
+            court_code = "3"  # default: appellate
+
+    # Auto-resolve case_type_id from prefix if missing
+    if not case_type_id and state_cd and court_code:
+        prefix = case_ref.split("/")[0].upper().strip()
+        if prefix:
+            try:
+                from ..services.resolve_ecourts_type import resolve_prefix_to_type_id
+                resolved = resolve_prefix_to_type_id(prefix, state_cd, court_code, db)
+                if resolved:
+                    case_type_id = resolved
+                    log.info("fetch-ecourts: resolved %r → type_id %s", prefix, resolved)
+                    # Persist so future fetches skip resolution
+                    try:
+                        db.update_tracked_case(current_user["id"], case_ref, {"case_type_id": resolved})
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log.warning("type_id resolution failed for %s: %s", case_ref, exc)
+
+    # cino is optional — _do_case_history discovers it via showRecords when empty
+    if not all([state_cd, court_code, case_type_id, case_no, case_year]):
         return {"status": "skipped", "reason": "missing_ecourts_params"}
 
-    # Check if a fresh cache entry already exists (< 6 hours old)
-    cached = db.get_case_history_cache(cino, state_cd, court_code, max_age_seconds=6 * 3600)
-    if cached:
-        return {"status": "cached", "cached_at": cached.get("cached_at")}
+    # Check if a fresh cache entry already exists (< 6 hours old) when cino is known
+    if cino:
+        cached = db.get_case_history_cache(cino, state_cd, court_code, max_age_seconds=6 * 3600)
+        if cached:
+            return {"status": "cached", "cached_at": cached.get("cached_at")}
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return {"status": "skipped", "reason": "no_api_key"}
+
+    # Capture for closure
+    _resolved_type_id = case_type_id
+    _cino = cino  # may be empty — discovered in background
 
     def _bg() -> None:
         try:
@@ -166,26 +208,51 @@ def fetch_ecourts(
             result = _do_case_history(
                 state_cd=state_cd,
                 court_code=court_code,
-                case_type_id=case_type_id,
+                case_type_id=_resolved_type_id,
                 case_no=case_no,
                 year=case_year,
-                target_cino=cino,
+                target_cino=_cino,
                 api_key=api_key,
             )
+            # Use discovered cino from result if we didn't have one
+            effective_cino = _cino or result.get("cino") or ""
+            if not effective_cino:
+                log.warning("fetch-ecourts: no cino discovered for %s", case_ref)
+                return
+
             db.set_case_history_cache(
-                cino=cino,
+                cino=effective_cino,
                 state_cd=state_cd,
                 court_code=court_code,
-                case_type_id=case_type_id,
+                case_type_id=_resolved_type_id,
                 case_no=case_no,
                 case_year=case_year,
                 data=result,
             )
-            log.info("fetch-ecourts: cached %s (cino=%s)", case_ref, cino)
+            log.info("fetch-ecourts: cached %s (cino=%s)", case_ref, effective_cino)
+
+            # Persist discovered cino + type_id back to tracked case
+            try:
+                updates: dict = {}
+                if not _cino and effective_cino:
+                    updates["cino"] = effective_cino
+                if updates:
+                    db.update_tracked_case(current_user["id"], case_ref, updates)
+            except Exception:
+                pass
+
+            # Auto-learn prefix→type_id mapping
+            try:
+                from ..services.resolve_ecourts_type import record_learned_prefix
+                prefix = case_ref.split("/")[0].upper().strip()
+                if prefix and _resolved_type_id:
+                    record_learned_prefix(state_cd, court_code, _resolved_type_id, prefix, db)
+            except Exception:
+                pass
         except Exception as exc:
             log.warning("fetch-ecourts failed for %s: %s", case_ref, exc)
 
-    threading.Thread(target=_bg, daemon=True, name=f"ecourts-fetch-{cino}").start()
+    threading.Thread(target=_bg, daemon=True, name=f"ecourts-fetch-{case_ref}").start()
     return {"status": "fetching"}
 
 
