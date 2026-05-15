@@ -24,8 +24,6 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from ..common.time import ist_today_str
-from ..db import DB
-
 _IST = ZoneInfo("Asia/Kolkata")
 
 log = structlog.get_logger()
@@ -73,7 +71,7 @@ def _build_alert_message(payload: dict) -> str:
 # ── Helpers (shared with Telegram bot logic) ──────────────────────────────────
 
 
-def _get_room_serial(db: DB, room_no: str) -> int | None:
+def _get_room_serial(db: Any, room_no: str) -> int | None:
     today = ist_today_str()
     states = db.list_current_state()
     serials: list[int] = []
@@ -90,7 +88,7 @@ def _get_room_serial(db: DB, room_no: str) -> int | None:
     return max(serials) if serials else None
 
 
-def _all_rooms_summary(db: DB) -> list[dict]:
+def _all_rooms_summary(db: Any) -> list[dict]:
     today = ist_today_str()
     states = db.list_current_state()
     rooms: dict[str, dict] = {}
@@ -113,7 +111,7 @@ def _all_rooms_summary(db: DB) -> list[dict]:
 # ── Inbound command parser ────────────────────────────────────────────────────
 
 
-def handle_inbound(form: dict[str, Any], db: DB) -> str:
+def handle_inbound(form: dict[str, Any], db: Any) -> str:
     """Parse a Twilio inbound WhatsApp message and return the reply text."""
     raw_from = form.get("From", "")
     # from_  = "whatsapp:+919876543210"  →  phone = "+919876543210"
@@ -180,7 +178,7 @@ def _help_text() -> str:
     )
 
 
-def _monitor_stale_warning(db: DB) -> str:
+def _monitor_stale_warning(db: Any) -> str:
     """Returns a warning string if monitor hasn't polled in >5 min, else ''."""
     last = db.get_monitor_state("last_successful_poll")
     if not last:
@@ -195,7 +193,7 @@ def _monitor_stale_warning(db: DB) -> str:
     return ""
 
 
-def _cmd_today(db: DB) -> str:
+def _cmd_today(db: Any) -> str:
     today = ist_today_str()
     rooms = _all_rooms_summary(db)
     warning = _monitor_stale_warning(db)
@@ -254,7 +252,7 @@ def _cmd_today(db: DB) -> str:
     return "\n".join(lines)
 
 
-def _cmd_causelist(db: DB) -> str:
+def _cmd_causelist(db: Any) -> str:
     today = ist_today_str()
     vc_links = db.get_vc_zoom_links(today)
     if not vc_links:
@@ -272,7 +270,7 @@ def _cmd_causelist(db: DB) -> str:
     )
 
 
-def _cmd_zoom(db: DB, room_no: str) -> str:
+def _cmd_zoom(db: Any, room_no: str) -> str:
     today = ist_today_str()
     vc_links = db.get_vc_zoom_links(today)
     # match regardless of leading zeros
@@ -285,7 +283,7 @@ def _cmd_zoom(db: DB, room_no: str) -> str:
     return f"📹 Room {room_no} — {today}\n{url}"
 
 
-def _cmd_daily(db: DB, phone: str) -> str:
+def _cmd_daily(db: Any, phone: str) -> str:
     today = ist_today_str()
     subs = _list_wa_subscriptions(db, phone)
     rooms = _all_rooms_summary(db)
@@ -320,7 +318,7 @@ def _cmd_daily(db: DB, phone: str) -> str:
     return "\n".join(lines)
 
 
-def _cmd_status(db: DB, room_no: str) -> str:
+def _cmd_status(db: Any, room_no: str) -> str:
     current = _get_room_serial(db, room_no)
     warning = _monitor_stale_warning(db)
     if current is None:
@@ -335,7 +333,7 @@ def _cmd_status(db: DB, room_no: str) -> str:
     return "\n".join(lines)
 
 
-def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
+def _cmd_watch(db: Any, phone: str, parts: list[str]) -> str:
     import re as _re
 
     room_no = parts[1]
@@ -396,7 +394,7 @@ def _cmd_watch(db: DB, phone: str, parts: list[str]) -> str:
     return msg
 
 
-def _cmd_unwatch(db: DB, phone: str, room_no: str) -> str:
+def _cmd_unwatch(db: Any, phone: str, room_no: str) -> str:
     removed = db.remove_whatsapp_subscription(phone, room_no)
     if not removed:
         subs = _list_wa_subscriptions(db, phone)
@@ -407,7 +405,7 @@ def _cmd_unwatch(db: DB, phone: str, room_no: str) -> str:
     return f"✓ Stopped watching Room {room_no}."
 
 
-def _cmd_list(db: DB, phone: str) -> str:
+def _cmd_list(db: Any, phone: str) -> str:
     subs = _list_wa_subscriptions(db, phone)
     warning = _monitor_stale_warning(db)
     if not subs:
@@ -427,7 +425,7 @@ def _cmd_list(db: DB, phone: str) -> str:
     return "\n".join(lines)
 
 
-def _list_wa_subscriptions(db: DB, phone: str) -> list[dict]:
+def _list_wa_subscriptions(db: Any, phone: str) -> list[dict]:
     with db.connect() as con:
         rows = con.execute(
             "SELECT * FROM subscriptions WHERE active=1 AND contact_type='whatsapp' AND phone=?",

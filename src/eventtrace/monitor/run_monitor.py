@@ -178,13 +178,34 @@ def _send_tg(settings: Settings, telegram_id: str, body: str) -> None:
     ).raise_for_status()
 
 
-def _deliver(sub: dict, body: str, settings: Settings) -> None:
+def _email_for_phone(db: Any, phone: str) -> str | None:
+    """Return verified email for a phone number, or None."""
+    try:
+        user = db.get_user_by_phone(phone)
+        if user and user.get("email_verified") and user.get("email"):
+            return user["email"]
+    except Exception:
+        pass
+    return None
+
+
+def _deliver(sub: dict, body: str, settings: Settings, db: Any = None) -> None:
+    from ..services.notifications import send_email_alert
+
     contact_type = sub.get("contact_type", "telegram")
     if contact_type == "whatsapp":
         phone = sub.get("phone", "")
         if not phone or not _wa_creds_ok(settings):
             return
         _send_wa(settings, phone, body)
+        # Also email if user has a verified email
+        if db and phone:
+            email = _email_for_phone(db, phone)
+            if email:
+                room_no = str(sub.get("room_no", ""))
+                subject = f"Court {room_no} Alert — SuperSahayak Legal"
+                html = f"<p style='font-size:15px;line-height:1.6'>{body.replace(chr(10), '<br>')}</p>"
+                send_email_alert(email, subject, html)
     elif contact_type == "telegram":
         tid = sub.get("telegram_id", "")
         if not tid or not settings.telegram_token:
@@ -222,7 +243,7 @@ def _notify_monitor_down(db: Any, settings: Settings) -> None:
                 "Board data may be stale — check the cause list directly.\n"
                 "Your alert is still active and will fire once monitoring resumes."
             )
-            _deliver(sub, body, settings)
+            _deliver(sub, body, settings, db)
         except Exception as exc:
             log.warning("monitor-down notify failed for sub %s: %s", sub["id"], exc)
 
@@ -267,7 +288,7 @@ def _notify_adjournments(
                     f"{serial_str}\n\n"
                     "Check the official cause list for rescheduling."
                 )
-                _deliver(sub, body, settings)
+                _deliver(sub, body, settings, db)
                 db.deactivate_subscription(sub["id"])
                 log.info(
                     "Adjournment notified: sub %s room %s target %d", sub["id"], room_no, target
@@ -309,6 +330,11 @@ def _send_reminders(snapshot: dict[str, dict[str, Any]], db: Any, settings: Sett
         if current_serial is None or current_serial < target:
             continue  # case not yet called
 
+        # If main alert fired at or past target, reminder is redundant
+        last_notified = sub.get("last_notified_serial")
+        if last_notified is not None and int(last_notified) >= target:
+            continue
+
         try:
             body = (
                 f"⚠️ *Reminder — Court Room {room_no}*\n"
@@ -316,7 +342,7 @@ def _send_reminders(snapshot: dict[str, dict[str, Any]], db: Any, settings: Sett
                 "Your case may have already been called.\n"
                 "Please check with the court immediately."
             )
-            _deliver(sub, body, settings)
+            _deliver(sub, body, settings, db)
             db.mark_reminder_sent(sub["id"])
             log.info("Reminder sent: sub %s room %s serial %d", sub["id"], room_no, current_serial)
         except Exception as exc:
@@ -376,9 +402,34 @@ def _dispatch_notifications(
                 if not sub.get("phone") or not _wa_creds_ok(settings):
                     log.warning("Twilio creds not set — skipping WhatsApp sub %s", sub["id"])
                     continue
-                from ..whatsapp_bot import _build_alert_message
+                from ..bots.whatsapp_bot import _build_alert_message
+                from ..services.notifications import build_email_html, send_email_alert, _email_subject
 
                 _send_wa(settings, sub["phone"], _build_alert_message(payload))
+                # Email the same alert if user has verified email
+                email = _email_for_phone(db, sub["phone"])
+                if email:
+                    case_info = db.get_causelist_case_by_serial(today_str, room_no, target)
+                    ctx = {
+                        "court_no": room_no,
+                        "current_serial": current_serial,
+                        "target_serial": target,
+                        "zoom_url": zoom_url,
+                        "date": today_str,
+                    }
+                    if case_info:
+                        ctx.update({
+                            "case_ref": case_info.get("case_ref") or "",
+                            "petitioner": case_info.get("petitioner") or "",
+                            "respondent": case_info.get("respondent") or "",
+                            "advocate": case_info.get("advocate") or "",
+                            "bench_label": case_info.get("bench_label") or "",
+                            "judges_json": case_info.get("judges_json") or "[]",
+                            "vc_link": case_info.get("vc_link") or zoom_url,
+                        })
+                    html = build_email_html("serial_reached", ctx, ctx.get("case_ref", ""))
+                    subj = _email_subject("serial_reached", ctx, ctx.get("case_ref", ""))
+                    send_email_alert(email, subj, html)
             else:
                 continue
 

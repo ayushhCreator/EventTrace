@@ -267,7 +267,8 @@ def send_alert(
 
 def _email_subject(alert_type: str, context: dict, case_ref: str) -> str:
     if alert_type == "serial_reached":
-        return f"SuperSahayak Legal — Court {context.get('court_no')} serial alert for {case_ref}"
+        ref = case_ref or f"serial {context.get('target_serial', '')}"
+        return f"SuperSahayak Legal — Court {context.get('court_no')} approaching: {ref}"
     if alert_type == "case_in_causelist":
         date = context.get("date", "")
         court = context.get("court_no", "")
@@ -352,18 +353,52 @@ def build_email_html(trigger_type: str, context: dict, case_ref: str) -> str:
     elif trigger_type == "serial_reached":
         court = context.get("court_no", "")
         current = context.get("current_serial", "")
-        alert = context.get("alert_serial", "")
+        target = context.get("target_serial", "")
         date = context.get("date", "")
+        petitioner = context.get("petitioner", "")
+        respondent = context.get("respondent", "")
+        advocate = context.get("advocate", "")
+        bench_label = context.get("bench_label", "")
+        vc_link = context.get("vc_link", "")
+        judges_json = context.get("judges_json", "[]")
+        try:
+            judges = json.loads(judges_json) if judges_json else []
+        except Exception:
+            judges = []
+        judges_str = ", ".join(judges) if judges else ""
+
         rows = _kv_row("Court", str(court)) if court else ""
-        rows += _kv_row("Board at serial", str(current)) if current else ""
-        rows += _kv_row("Your case serial", str(alert)) if alert else ""
-        rows += _kv_row("Date", date) if date else ""
+        rows += _kv_row("Board now at serial", str(current)) if current else ""
+        rows += _kv_row("Your case serial", str(target)) if target else ""
+        if case_ref:
+            rows += _kv_row("Case number", case_ref)
+        if petitioner or respondent:
+            parties = " vs. ".join(filter(None, [petitioner, respondent]))
+            rows += _kv_row("Parties", parties)
+        if advocate:
+            rows += _kv_row("Advocate", advocate)
+        if bench_label:
+            rows += _kv_row("Bench", bench_label)
+        if judges_str:
+            rows += _kv_row("Judge(s)", judges_str)
+        if date:
+            rows += _kv_row("Date", date)
+
+        vc_html = ""
+        if vc_link:
+            vc_html = (
+                f'<p style="margin:20px 0 0;">'
+                f'<a href="{vc_link}" style="background:#1a1a2e;color:#fff;padding:10px 20px;'
+                f'border-radius:4px;text-decoration:none;font-size:14px;">🎥 Join VC Link</a></p>'
+            )
+
+        display_ref = case_ref or f"Serial {target}"
         body = (
             f'<h2 style="margin:0 0 8px;color:#b45309;font-size:20px;">⚡ Case Coming Up Soon</h2>'
             f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
-            f'<strong>{case_ref}</strong> is approaching on the display board.</p>'
+            f'<strong>{display_ref}</strong> is approaching on the display board.</p>'
             f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
-            f'{rows}</table>'
+            f'{rows}</table>{vc_html}'
         )
 
     elif trigger_type == "display_board_active":
