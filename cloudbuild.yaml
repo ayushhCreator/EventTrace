@@ -105,7 +105,7 @@ steps:
           --max-instances 1 \
           --timeout 300 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_WHATSAPP_NUMBER=MSG91_WHATSAPP_NUMBER:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_WHATSAPP_NUMBER=MSG91_WHATSAPP_NUMBER:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESEND_FROM_EMAIL=RESEND_FROM_EMAIL:latest \
           --set-env-vars CHD_EMBED_CAUSELIST_SCHEDULER=0 \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
@@ -128,7 +128,7 @@ steps:
           --max-instances 1 \
           --timeout 300 \
           --set-cloudsql-instances $_SQL_CONN \
-          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_WHATSAPP_NUMBER=MSG91_WHATSAPP_NUMBER:latest \
+          --set-secrets DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_HMAC_SECRET=OTP_HMAC_SECRET:latest,MSG91_AUTH_KEY=MSG91_AUTH_KEY:latest,MSG91_WHATSAPP_NUMBER=MSG91_WHATSAPP_NUMBER:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESEND_FROM_EMAIL=RESEND_FROM_EMAIL:latest \
           --service-account $_RUN_SA \
           --project $PROJECT_ID
 
