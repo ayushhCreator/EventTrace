@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import structlog
 from typing import Any
 
@@ -126,6 +128,65 @@ def clear_alert(
     if not ok:
         raise HTTPException(status_code=404, detail="Case not tracked")
     return db.get_tracked_case(current_user["id"], case_ref)
+
+
+@router.post("/{case_ref:path}/fetch-ecourts", status_code=202)
+def fetch_ecourts(
+    case_ref: str,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    """Trigger a background eCourts fetch for a tracked case. Returns immediately."""
+    case = db.get_tracked_case(current_user["id"], case_ref)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not tracked")
+
+    cino = (case.get("cino") or "").strip()
+    state_cd = (case.get("state_cd") or "").strip()
+    court_code = (case.get("court_code") or "").strip()
+    case_type_id = (case.get("case_type_id") or "").strip()
+    case_no = (case.get("case_no") or "").strip()
+    case_year = str(case.get("case_year") or "").strip()
+
+    if not all([cino, state_cd, court_code, case_type_id, case_no, case_year]):
+        return {"status": "skipped", "reason": "missing_ecourts_params"}
+
+    # Check if a fresh cache entry already exists (< 6 hours old)
+    cached = db.get_case_history_cache(cino, state_cd, court_code, max_age_seconds=6 * 3600)
+    if cached:
+        return {"status": "cached", "cached_at": cached.get("cached_at")}
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"status": "skipped", "reason": "no_api_key"}
+
+    def _bg() -> None:
+        try:
+            from ..routes.ecourts_test import _do_case_history
+            result = _do_case_history(
+                state_cd=state_cd,
+                court_code=court_code,
+                case_type_id=case_type_id,
+                case_no=case_no,
+                year=case_year,
+                target_cino=cino,
+                api_key=api_key,
+            )
+            db.set_case_history_cache(
+                cino=cino,
+                state_cd=state_cd,
+                court_code=court_code,
+                case_type_id=case_type_id,
+                case_no=case_no,
+                case_year=case_year,
+                data=result,
+            )
+            log.info("fetch-ecourts: cached %s (cino=%s)", case_ref, cino)
+        except Exception as exc:
+            log.warning("fetch-ecourts failed for %s: %s", case_ref, exc)
+
+    threading.Thread(target=_bg, daemon=True, name=f"ecourts-fetch-{cino}").start()
+    return {"status": "fetching"}
 
 
 @router.delete("/{case_ref:path}", status_code=204)

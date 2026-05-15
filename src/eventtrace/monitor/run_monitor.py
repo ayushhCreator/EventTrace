@@ -517,6 +517,36 @@ def main() -> None:
     notify_thread.start()
     log.info("Notification retry worker started")
 
+    # Start case history daily refresh (eCourts data for all tracked cases)
+    def _case_history_refresh_thread() -> None:
+        import os as _os
+        from ..common.time import ist_now as _ist_now
+        _api_key = getattr(settings, "anthropic_api_key", None) or _os.getenv("ANTHROPIC_API_KEY", "")
+        if not _api_key:
+            log.info("ANTHROPIC_API_KEY not set — case history refresh disabled")
+            return
+        _last_refresh_date: str | None = None
+        while True:
+            try:
+                now = _ist_now()
+                today = now.date().isoformat()
+                # Run once per day at 21:30 IST
+                if now.strftime("%H:%M") >= "21:30" and _last_refresh_date != today:
+                    from ..case_history_refresh import refresh_cases
+                    log.info("case-history-refresh: starting daily refresh")
+                    refresh_cases(db, _api_key, limit=None, delay_s=1.0)
+                    _last_refresh_date = today
+                    log.info("case-history-refresh: done for %s", today)
+            except Exception as exc:
+                log.warning("case-history-refresh error: %s", exc)
+            time.sleep(60)
+
+    case_refresh_thread = threading.Thread(
+        target=_case_history_refresh_thread, daemon=True, name="case-history-refresh"
+    )
+    case_refresh_thread.start()
+    log.info("Case history daily refresh thread started")
+
     # Start causelist daily scheduler in background.
     # Set CHD_EMBED_CAUSELIST_SCHEDULER=0 when running alongside a dedicated
     # supersahayak-scheduler service (production) to avoid duplicate scraping.
