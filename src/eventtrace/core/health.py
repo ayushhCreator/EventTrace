@@ -29,4 +29,4 @@ def start_health_server() -> None:
     server = HTTPServer(("0.0.0.0", port), _Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
-    print(f"==> Health server running in background thread.")
+    print("==> Health server running in background thread.")

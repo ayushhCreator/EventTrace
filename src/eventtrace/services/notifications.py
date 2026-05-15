@@ -281,7 +281,7 @@ def _email_subject(alert_type: str, context: dict, case_ref: str) -> str:
     if alert_type == "vc_link_available":
         return f"SuperSahayak Legal — VC link ready for {case_ref}"
     if alert_type == "causelist_released":
-        return f"SuperSahayak Legal — Tomorrow's cause list is out"
+        return "SuperSahayak Legal — Tomorrow's cause list is out"
     return f"SuperSahayak Legal — Update for {case_ref}"
 
 

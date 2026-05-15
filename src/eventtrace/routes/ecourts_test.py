@@ -498,8 +498,8 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
             return []
         for br in span.find_all("br"):
             br.replace_with("\n")
-        lines = [_html.unescape(l.strip()) for l in span.get_text().split("\n")]
-        return [l for l in lines if l]
+        lines = [_html.unescape(ln.strip()) for ln in span.get_text().split("\n")]
+        return [ln for ln in lines if ln]
 
     def _party_lines_any(classes: list[str]) -> list[str]:
       for cls in classes:

@@ -64,7 +64,6 @@ def _dispatch_queue_item(db: Any, item: dict) -> bool:
         message = build_message(payload.get("trigger_type", ""), payload)
 
     sent = False
-    provider = None
     provider_response = None
 
     if channel == "whatsapp":
@@ -76,20 +75,17 @@ def _dispatch_queue_item(db: Any, item: dict) -> bool:
         wk = _wati_key()
         if wk:
             sent = _send_wati(wa_number, message, wk)
-            provider = "wati"
             provider_response = json.dumps({"sent": sent})
 
         if not sent:
             mk = _msg91_whatsapp_key()
             if mk:
                 sent = _send_msg91_whatsapp(wa_number, message, mk)
-                provider = "msg91"
                 provider_response = json.dumps({"sent": sent})
 
         if not sent and not wk and not _msg91_whatsapp_key():
             log.info("retry_worker: no WA provider configured — marking sent (dev)", user_id=user_id)
             sent = True
-            provider = "dev"
 
     elif channel == "email":
         email = user.get("email", "")
