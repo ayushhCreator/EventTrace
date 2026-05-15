@@ -1,13 +1,11 @@
 """Causelist daily scheduler with retry logic.
 
-Schedule (IST): attempt at 20:30, 21:00, 21:30, 22:00.
-Iterates all registered sources; stops retrying a source once it succeeds.
-If all sources fail across all windows: Telegram alert, sleep until next day.
+Two scrape passes per day:
+  Evening (20:30–22:00 IST): fetch next working day's list as soon as published.
+  Morning (08:30–09:30 IST): re-scrape TODAY's list — courts often revise overnight.
 
-Date logic: court publishes the *next working day's* list each evening.
-  Mon–Thu evening → next day (Tue–Fri)
-  Friday evening  → Monday (skip weekend)
-  Weekend evening → Monday
+The morning pass always overwrites, ensuring users see the final revised version
+rather than whatever was published the previous evening.
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ from ..core.health import start_health_server
 log = structlog.get_logger()
 
 _WINDOWS_IST = ["20:30", "21:00", "21:30", "22:00"]
+_MORNING_WINDOWS_IST = ["08:30", "09:00", "09:30"]
 
 
 def _now_ist() -> datetime:
@@ -143,6 +142,28 @@ def _run_case_diff_jobs(db: Any, date_str: str) -> None:
         log.warning("case_diff jobs failed for %s: %s", date_str, exc)
 
 
+def _is_working_day(d: date) -> bool:
+    return d.weekday() < 5
+
+
+def _morning_rescrape(db: Any, target_date: date, sources: list[Any]) -> None:
+    """Force re-scrape today's daily causelists — court may have revised overnight."""
+    daily_sources = [s for s in sources if getattr(s, "_cfg", None) and
+                     getattr(s._cfg, "schedule", "daily") == "daily"]
+    if not daily_sources:
+        return
+    log.info("Morning re-scrape: force-refreshing %d source(s) for %s", len(daily_sources), target_date)
+    for source in daily_sources:
+        log.info("[%s] morning re-scrape %s", source.source_id, target_date)
+        result = source.fetch(target_date)
+        if result.ok:
+            n = _store_result(db, result)
+            log.info("[%s] morning re-scrape stored %d cases for %s", source.source_id, n, target_date)
+            _run_case_diff_jobs(db, target_date.isoformat())
+        else:
+            log.warning("[%s] morning re-scrape failed for %s: %s", source.source_id, target_date, result.error or "empty")
+
+
 def _sleep_until_tomorrow(settings: Any, failed_ids: set[str], target_date: date) -> None:
     msg = (
         f"Causelist scrape FAILED for {target_date} — all 4 windows exhausted. "
@@ -162,14 +183,34 @@ def run_scheduler(settings: Any, db: Any) -> None:
 
     sources = build_sources()
     log.info(
-        "Causelist scheduler started. Sources: %s. Windows (IST): %s",
+        "Causelist scheduler started. Sources: %s. Evening windows (IST): %s. Morning re-scrape: %s",
         [s.source_id for s in sources],
         ", ".join(_WINDOWS_IST),
+        ", ".join(_MORNING_WINDOWS_IST),
     )
+
+    morning_rescraped_date: date | None = None  # track so we only re-scrape once per day
 
     while True:
         now = _now_ist()
-        target_date = _next_working_day(now.date())
+        today = now.date()
+        now_hhmm = now.strftime("%H:%M")
+
+        # ── Morning re-scrape pass (08:30–09:30 IST, working days only) ──────
+        # Courts often revise their causelists overnight. Re-fetch today's list
+        # to overwrite yesterday's stale evening scrape with the final version.
+        if (
+            _is_working_day(today)
+            and _MORNING_WINDOWS_IST[0] <= now_hhmm <= _MORNING_WINDOWS_IST[-1]
+            and morning_rescraped_date != today
+        ):
+            _morning_rescrape(db, today, sources)
+            morning_rescraped_date = today
+            time.sleep(60)
+            continue
+
+        # ── Evening scrape pass: fetch next working day's list ────────────────
+        target_date = _next_working_day(today)
 
         # Compute which sources still need scraping for target_date.
         # Skip sources whose schedule doesn't apply (monthly only in first week).
@@ -191,8 +232,6 @@ def run_scheduler(settings: Any, db: Any) -> None:
             log.info("All sources done for %s. Sleeping %.0f min.", target_date, secs / 60)
             time.sleep(secs)
             continue
-
-        now_hhmm = now.strftime("%H:%M")
 
         if now_hhmm < _WINDOWS_IST[0]:
             next_w, secs = _next_window_after_now()
