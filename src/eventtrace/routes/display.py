@@ -159,16 +159,6 @@ def display_board(
 
     benches = db.list_causelist_benches(target)
 
-    # When stale and no benches for today, use most recent causelist date
-    bench_date = target
-    if stale and not benches:
-        for past_date in db.list_causelist_dates():
-            past_benches = db.list_causelist_benches(past_date)
-            if past_benches:
-                benches = past_benches
-                bench_date = past_date
-                break
-
     live_states = db.list_current_state()
     live: dict[tuple[str, str], dict] = {}
     live_by_room: dict[str, dict] = {}
@@ -186,10 +176,28 @@ def display_board(
                 live[(room, side_key)] = entry
             live_by_room.setdefault(room, entry)
 
+    # When stale and no benches for target date, derive the actual bench date
+    # from hearing_date in live current_state (exact date match, not guessing)
+    bench_date = target
+    if stale and not benches:
+        # Collect hearing_dates seen in live data, pick most common
+        from collections import Counter
+        hearing_dates = [
+            entry["data"].get("hearing_date")
+            for entry in live_by_room.values()
+            if entry["data"].get("hearing_date")
+        ]
+        if hearing_dates:
+            best_date = Counter(hearing_dates).most_common(1)[0][0]
+            candidate = db.list_causelist_benches(best_date)
+            if candidate:
+                benches = candidate
+                bench_date = best_date
+
     absent = set(db.list_absent_court_ids())
     serial_starts = db.list_serial_start_times()
     vc_links = db.get_vc_zoom_links(bench_date)
-    # When no vc_links for bench date, try most recent available date
+    # Fall back to vc_zoom_link table for bench_date if available
     if not vc_links:
         for past_date in db.list_vc_dates():
             vc_links = db.get_vc_zoom_links(past_date)
