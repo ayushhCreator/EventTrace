@@ -159,6 +159,16 @@ def display_board(
 
     benches = db.list_causelist_benches(target)
 
+    # When stale and no benches for today, use most recent causelist date
+    bench_date = target
+    if stale and not benches:
+        for past_date in db.list_causelist_dates():
+            past_benches = db.list_causelist_benches(past_date)
+            if past_benches:
+                benches = past_benches
+                bench_date = past_date
+                break
+
     live_states = db.list_current_state()
     live: dict[tuple[str, str], dict] = {}
     live_by_room: dict[str, dict] = {}
@@ -178,8 +188,8 @@ def display_board(
 
     absent = set(db.list_absent_court_ids())
     serial_starts = db.list_serial_start_times()
-    vc_links = db.get_vc_zoom_links(target)
-    # When no vc_links for target date, try most recent available date
+    vc_links = db.get_vc_zoom_links(bench_date)
+    # When no vc_links for bench date, try most recent available date
     if not vc_links:
         for past_date in db.list_vc_dates():
             vc_links = db.get_vc_zoom_links(past_date)
