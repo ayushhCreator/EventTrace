@@ -115,7 +115,7 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
                     "type": "template",
                     "template": {
                         "name": _MSG91_WA_TEMPLATE,
-                        "language": {"code": "en_US", "policy": "deterministic"},
+                        "language": {"code": "en", "policy": "deterministic"},
                         "namespace": _MSG91_WA_NAMESPACE,
                         "to_and_components": [
                             {
@@ -165,7 +165,7 @@ def send_welcome_whatsapp(phone: str, name: str) -> bool:
                     "type": "template",
                     "template": {
                         "name": _MSG91_WA_WELCOME_TEMPLATE,
-                        "language": {"code": "en_US", "policy": "deterministic"},
+                        "language": {"code": "en", "policy": "deterministic"},
                         "namespace": _MSG91_WA_NAMESPACE,
                         "to_and_components": [
                             {
