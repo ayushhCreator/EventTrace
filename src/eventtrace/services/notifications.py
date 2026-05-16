@@ -23,7 +23,7 @@ def _resend_key() -> str:
 
 
 def _resend_from() -> str:
-    return os.getenv("RESEND_FROM_EMAIL", "alerts@supersahayak.in")
+    return os.getenv("RESEND_FROM_EMAIL", "alerts@legal.supersahayak.com")
 
 
 def _msg91_whatsapp_number() -> str:

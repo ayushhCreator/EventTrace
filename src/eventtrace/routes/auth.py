@@ -277,13 +277,19 @@ def send_email_otp(
       <p style="color:#bbb;font-size:11px;margin:0">If you didn't request this, you can safely ignore this email.</p>
     </div>
     """
+    import os
+    is_dev = not os.getenv("RESEND_API_KEY")
+
     ok = send_email_alert(email, "Your SuperSahayak Legal verification code", html)
-    if not ok:
+    if not ok and not is_dev:
         raise HTTPException(
             status_code=503, detail="Failed to send email — check RESEND_API_KEY configuration"
         )
 
-    return {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
+    payload: dict = {"detail": "OTP sent", "expires_in": auth_svc.OTP_EXPIRE_MINUTES * 60}
+    if is_dev:
+        payload["dev_otp"] = otp
+    return payload
 
 
 @router.post("/email/verify-otp")
