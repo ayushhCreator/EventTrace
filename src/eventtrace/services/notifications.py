@@ -89,7 +89,7 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
 
 _MSG91_WA_NAMESPACE = "1bdf9737_865c_42a5_8c80_aa36de3fa847"
 _MSG91_WA_TEMPLATE = "court_update"
-_MSG91_WA_WELCOME_TEMPLATE = os.getenv("MSG91_WA_TEMPLATE_WELCOME", "ss_welcome")
+_MSG91_WA_WELCOME_TEMPLATE = os.getenv("MSG91_WA_TEMPLATE_WELCOME", "ss_welcome_v2")
 
 
 def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
