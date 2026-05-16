@@ -150,6 +150,7 @@ def field_durations(db: Any = Depends(get_db)) -> dict[str, str]:
 @router.get("/display-board")
 def display_board(
     date: str | None = Query(None, description="YYYY-MM-DD IST, defaults to today"),
+    stale: bool = Query(False, description="If true, show last known state ignoring hearing_date filter"),
     db: Any = Depends(get_db),
 ) -> list[dict]:
     import json
@@ -178,6 +179,12 @@ def display_board(
     absent = set(db.list_absent_court_ids())
     serial_starts = db.list_serial_start_times()
     vc_links = db.get_vc_zoom_links(target)
+    # When no vc_links for target date, try most recent available date
+    if not vc_links:
+        for past_date in db.list_vc_dates():
+            vc_links = db.get_vc_zoom_links(past_date)
+            if vc_links:
+                break
 
     results = []
     seen = set()
@@ -231,7 +238,7 @@ def display_board(
                 "judges": judges,
                 "bench_label": bench.get("bench_label"),
                 "not_sitting": bool(bench.get("not_sitting")),
-                "vc_link": vc_links.get(court_no) or bench.get("vc_link"),
+                "vc_link": vc_links.get(court_no) or ((bench.get("vc_link") or "").startswith("http") and bench.get("vc_link") or None),
                 "at_time": bench.get("at_time"),
                 "floor": bench.get("floor"),
                 "building": bench.get("building"),
@@ -256,7 +263,7 @@ def display_board(
         if room_no in seen:
             continue
         live_data = live_entry.get("data", {})
-        if live_data.get("hearing_date") and live_data["hearing_date"] != target:
+        if not stale and live_data.get("hearing_date") and live_data["hearing_date"] != target:
             continue
         court_id = live_entry.get("court_id", room_no)
         serial_start = serial_starts.get(court_id) or serial_starts.get(room_no)
@@ -279,7 +286,7 @@ def display_board(
                 "judges": [live_data["judge_names"]] if live_data.get("judge_names") else [],
                 "bench_label": None,
                 "not_sitting": False,
-                "vc_link": vc_links.get(room_no) or live_data.get("vc_link"),
+                "vc_link": vc_links.get(room_no) or (live_data.get("vc_link") or "").startswith("http") and live_data.get("vc_link") or None,
                 "at_time": None,
                 "floor": None,
                 "building": None,
