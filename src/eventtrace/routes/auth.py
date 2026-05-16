@@ -144,6 +144,16 @@ def verify_otp(
     _set_auth_cookie(response, access_token, settings)
     _set_refresh_cookie(response, refresh_token, settings)
     is_new = not user.get("name")
+
+    if is_new:
+        from ..services.notifications import send_welcome_whatsapp
+        import threading
+        threading.Thread(
+            target=send_welcome_whatsapp,
+            args=(phone, user.get("name") or ""),
+            daemon=True,
+        ).start()
+
     return {"user": user, "is_new_user": is_new}
 
 

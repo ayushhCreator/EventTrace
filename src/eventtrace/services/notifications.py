@@ -89,6 +89,7 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
 
 _MSG91_WA_NAMESPACE = "67e7d30e_07d9_45d3_9432_f8297495dbf1"
 _MSG91_WA_TEMPLATE = "court_update"
+_MSG91_WA_WELCOME_TEMPLATE = os.getenv("MSG91_WA_TEMPLATE_WELCOME", "ss_welcome")
 
 
 def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
@@ -135,6 +136,57 @@ def _send_msg91_whatsapp(phone: str, message: str, auth_key: str) -> bool:
         return True
     except Exception as exc:
         log.warning("MSG91 WhatsApp send failed: %s", exc)
+        return False
+
+
+def send_welcome_whatsapp(phone: str, name: str) -> bool:
+    """Send welcome template to new user on first login."""
+    auth_key = _msg91_whatsapp_key()
+    wa_number = _msg91_whatsapp_number()
+    if not auth_key or not wa_number:
+        log.info("MSG91 not configured — skipping welcome WhatsApp to %s", phone)
+        return False
+    try:
+        import httpx
+
+        mobile = phone.lstrip("+")
+        display_name = name or "there"
+        if os.getenv("MSG91_DRY_RUN"):
+            log.warning("[DRY-RUN] welcome WhatsApp → to=%s name=%r template=%s", mobile, display_name, _MSG91_WA_WELCOME_TEMPLATE)
+            return True
+        resp = httpx.post(
+            "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
+            headers={"authkey": auth_key, "Content-Type": "application/json"},
+            json={
+                "integrated_number": wa_number,
+                "content_type": "template",
+                "payload": {
+                    "messaging_product": "whatsapp",
+                    "type": "template",
+                    "template": {
+                        "name": _MSG91_WA_WELCOME_TEMPLATE,
+                        "language": {"code": "en", "policy": "deterministic"},
+                        "namespace": _MSG91_WA_NAMESPACE,
+                        "to_and_components": [
+                            {
+                                "to": [mobile],
+                                "components": {
+                                    "body_1": {"type": "text", "value": display_name}
+                                },
+                            }
+                        ],
+                    },
+                },
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            log.warning("Welcome WhatsApp error %s: %s", resp.status_code, resp.text[:200])
+            return False
+        log.info("Welcome WhatsApp sent to %s", mobile)
+        return True
+    except Exception as exc:
+        log.warning("Welcome WhatsApp send failed: %s", exc)
         return False
 
 
