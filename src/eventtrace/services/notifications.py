@@ -87,7 +87,7 @@ def _send_wati(phone: str, message: str, wati_key: str) -> bool:
         return False
 
 
-_MSG91_WA_NAMESPACE = "67e7d30e_07d9_45d3_9432_f8297495dbf1"
+_MSG91_WA_NAMESPACE = "1bdf9737_865c_42a5_8c80_aa36de3fa847"
 _MSG91_WA_TEMPLATE = "court_update"
 _MSG91_WA_WELCOME_TEMPLATE = os.getenv("MSG91_WA_TEMPLATE_WELCOME", "ss_welcome")
 
