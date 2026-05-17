@@ -21,7 +21,7 @@ import requests
 import structlog
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from ..services.deps import get_db
 
@@ -909,6 +909,51 @@ async def get_case_history(request: Request):
     except Exception as e:
         log.error("case_history error", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@router.get("/api/order-pdf")
+async def get_order_pdf(
+    request: Request,
+    state_cd: str,
+    court_code: str,
+    case_type_id: str,
+    case_no: str,
+    year: str,
+    order_no: str,
+    cino: str = "",
+):
+    """Stream an order PDF. Re-fetches case history (CAPTCHA solve) to get a fresh session."""
+    if not all([state_cd, court_code, case_type_id, case_no, year, order_no]):
+        return JSONResponse({"error": "Missing required fields"}, status_code=400)
+
+    settings = request.app.state.settings
+    api_key = getattr(settings, "anthropic_api_key", None) or os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
+
+    try:
+        result = _do_case_history(state_cd, court_code, case_type_id, case_no, year, cino, api_key)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    except Exception as e:
+        log.error("order_pdf case_history error", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+    # Find matching order
+    order = next((o for o in result.get("orders", []) if str(o.get("number", "")) == order_no), None)
+    if not order:
+        return JSONResponse({"error": f"Order {order_no} not found"}, status_code=404)
+
+    pdf_b64 = order.get("pdf_b64")
+    if pdf_b64:
+        pdf_bytes = base64.standard_b64decode(pdf_b64)
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=order_{order_no}.pdf"},
+        )
+
+    return JSONResponse({"error": "PDF not available for this order"}, status_code=404)
 
 
 @router.post("/api/search/cnr")
