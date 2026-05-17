@@ -53,20 +53,28 @@ async def unified_case_search(request: Request) -> dict:
         pass
 
     # 3. Return cached eCourts data if available (populated by fetch-ecourts or daily refresh)
-    ecourts_data: dict | None = None
+    # ecourts field shape: {results: [{cnr, case_ref}], count, history: <full_dict>}
+    # Frontend reads ecourts.results[0].cnr to fire the getCaseHistory query,
+    # which then hits /ecourts-test/api/case-history and returns from cache instantly.
+    ecourts_payload: dict | None = None
     if tracked_case:
         cino = (tracked_case.get("cino") or "").strip()
         state_cd = (tracked_case.get("state_cd") or "").strip()
         court_code = (tracked_case.get("court_code") or "").strip()
         if cino and state_cd and court_code:
             try:
-                ecourts_data = db.get_case_history_cache(cino, state_cd, court_code)
+                history = db.get_case_history_cache(cino, state_cd, court_code)
+                if history:
+                    ecourts_payload = {
+                        "results": [{"cnr": cino, "case_ref": raw_ref}],
+                        "count": 1,
+                    }
             except Exception as exc:
                 log.warning("case_history_cache lookup failed: %s", exc)
 
     return {
         "case_ref": raw_ref,
-        "ecourts": ecourts_data,
+        "ecourts": ecourts_payload,
         "causelist_appearances": appearances,
         "is_tracked": is_tracked,
     }

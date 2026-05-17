@@ -263,25 +263,21 @@ def fetch_ecourts(
     return {"status": "fetching"}
 
 
-@router.post("/{case_ref:path}/notify", status_code=200)
+@router.post("/notify", status_code=200)
 def subscribe_causelist_alert(
     case_ref: str,
     current_user: dict = Depends(_current_user),
     db: Any = Depends(get_db),
 ) -> dict:
-    """Subscribe to case_in_causelist notifications for a tracked case.
-    Tracks the case automatically if not already tracked.
-    """
+    """Subscribe to case_in_causelist notifications. case_ref passed as query param to avoid path-encoding issues."""
     user_id = str(current_user["id"])
 
-    # Ensure case is tracked
     existing = db.get_tracked_case(user_id, case_ref)
     if not existing:
-        db.track_case(user_id, {"case_ref": case_ref})
+        db.add_tracked_case(user_id, case_ref)
 
     db.upsert_single_alert_pref(user_id, case_ref, "case_in_causelist", enabled=True)
 
-    # Resolve which channels are available for this user
     user = db.get_user_by_id(user_id) or {}
     channels = []
     if user.get("telegram_chat_id"):
@@ -294,13 +290,13 @@ def subscribe_causelist_alert(
     return {"subscribed": True, "case_ref": case_ref, "channels": channels}
 
 
-@router.delete("/{case_ref:path}/notify", status_code=200)
+@router.delete("/notify", status_code=200)
 def unsubscribe_causelist_alert(
     case_ref: str,
     current_user: dict = Depends(_current_user),
     db: Any = Depends(get_db),
 ) -> dict:
-    """Unsubscribe from case_in_causelist notifications for a case."""
+    """Unsubscribe from case_in_causelist notifications. case_ref passed as query param."""
     user_id = str(current_user["id"])
     db.upsert_single_alert_pref(user_id, case_ref, "case_in_causelist", enabled=False)
     return {"subscribed": False, "case_ref": case_ref}

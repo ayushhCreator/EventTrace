@@ -328,6 +328,8 @@ def _do_case_history(
 
 def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
     """Parse getCaseHistory HTML response into structured JSON."""
+    import re as _re
+
     if "<table" not in raw.lower() and "<tr" not in raw.lower():
         # Tilde/hash delimited fallback
         hearings = []
@@ -352,9 +354,8 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
             return ""
         return _html.unescape(tag.get_text(" ", strip=True))
 
-    # ── Content-fingerprint table classifier ─────────────────────────────────
-    # Walk every table once; identify it by keywords in its text content.
-    # This is resilient to CSS class name changes and heading-proximity bugs.
+    def _clean_val(s: str) -> str:
+        return _re.sub(r"^[\s: ]+", "", s).strip()
 
     case_details: dict[str, str] = {}
     case_status: dict[str, str] = {}
@@ -365,6 +366,50 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
     category: dict[str, str] = {}
     objections: list[dict] = []
     documents: list[dict] = []
+
+    # ── Case Details: span.case_details_table rows ───────────────────────────
+    # Each outer span is a row; fields are non-":" labels, values are text or ":" labels.
+    for span in soup.find_all("span", class_="case_details_table"):
+        span_text = _html.unescape(span.get_text(" ", strip=True))
+        # Collect field-name labels (those not starting with ":")
+        field_labels = [
+            _html.unescape(lbl.get_text(strip=True))
+            for lbl in span.find_all("label")
+            if not _html.unescape(lbl.get_text(strip=True)).startswith(":")
+            and _html.unescape(lbl.get_text(strip=True)).strip()
+        ]
+        for field in field_labels:
+            field_clean = field.rstrip(":").strip()
+            if not field_clean or field_clean in case_details:
+                continue
+            if field_clean not in span_text:
+                continue
+            after = span_text[span_text.index(field_clean) + len(field_clean):]
+            # Trim at next field boundary
+            for other in field_labels:
+                if other != field and other.rstrip(":").strip() in after:
+                    after = after[: after.index(other.rstrip(":").strip())]
+            value = _clean_val(after).split("  ")[0].strip()
+            if value and len(value) < 120:
+                case_details[field_clean] = value
+
+    # ── Case Status: div immediately after <h2>Case Status</h2> ─────────────
+    # Structure: <label><strong>FIELD</strong><strong>: VALUE</strong></label>
+    for h2 in soup.find_all("h2"):
+        if "case status" in _text(h2).lower():
+            status_div = h2.find_next_sibling("div")
+            if status_div:
+                for label in status_div.find_all("label"):
+                    strongs = label.find_all("strong")
+                    if len(strongs) >= 2:
+                        field = _text(strongs[0]).strip().rstrip(":")
+                        value = _clean_val(_text(strongs[1]))
+                        if field and value:
+                            case_status[field] = value
+            break
+
+    def _tbl_text(tbl) -> str:
+        return tbl.get_text(" ", strip=True).lower()
 
     def _kv_table(tbl) -> dict[str, str]:
         result: dict[str, str] = {}
@@ -377,34 +422,11 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                     result[label] = value
         return result
 
-    def _tbl_text(tbl) -> str:
-        return tbl.get_text(" ", strip=True).lower()
-
     for tbl in soup.find_all("table"):
         t = _tbl_text(tbl)
 
-        # ── Case Details: has CNR number ──────────────────────────────────
-        if not case_details and "cnr" in t and ("filing" in t or "registration" in t):
-            case_details = _kv_table(tbl)
-
-        # ── Case Status: has "first hearing date" or "stage of case" ─────
-        elif not case_status and ("first hearing" in t or "stage of case" in t or "next hearing" in t):
-            for row in tbl.find_all("tr"):
-                cells = row.find_all(["td", "th"])
-                if len(cells) >= 2:
-                    label = _text(cells[0]).rstrip(":")
-                    value = _text(cells[1])
-                    if label:
-                        case_status[label] = value
-                elif len(cells) == 1:
-                    raw = _text(cells[0])
-                    if ":" in raw:
-                        label, _, value = raw.partition(":")
-                        if label.strip():
-                            case_status[label.strip()] = value.strip()
-
         # ── Acts: has "under act" header ──────────────────────────────────
-        elif not acts and "under act" in t:
+        if not acts and "under act" in t:
             rows = tbl.find_all("tr")
             start = 1 if rows and "under act" in _text(rows[0]).lower() else 0
             for row in rows[start:]:
@@ -415,17 +437,7 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                     if act_val or sec_val:
                         acts.append({"act": act_val, "section": sec_val})
 
-        # ── Subordinate Court: has "court number and name" or "district" ──
-        elif not sub_court and ("court number and name" in t or ("district" in t and "state" in t and "case decision" in t)):
-            for row in tbl.find_all("tr"):
-                cells = row.find_all(["td", "th"])
-                if len(cells) >= 2:
-                    label = _text(cells[0]).rstrip(":")
-                    value = _text(cells[1])
-                    if label:
-                        sub_court[label] = value
-
-        # ── Hearing History: has "cause list type" and "purpose of hearing" ──
+        # ── Hearing History: has "cause list type" and "purpose" ──────────
         elif not hearings and "cause list type" in t and "purpose" in t:
             for row in tbl.find_all("tr")[1:]:
                 cells = row.find_all("td")
@@ -455,8 +467,9 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                     continue
                 pdf_link = cells[4].find("a") if len(cells) > 4 else None
                 href = pdf_link.get("href", "") if pdf_link else ""
+                # href is relative: "display_pdf.php?..." → build absolute using /cases/ path
                 pdf_url = (
-                    f"https://hcservices.ecourts.gov.in/ecourtindiaHC/{href.lstrip('/')}"
+                    f"https://hcservices.ecourts.gov.in/ecourtindiaHC/cases/{href.lstrip('/')}"
                     if href else None
                 )
                 orders.append({
@@ -467,7 +480,7 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                     "pdf_url": pdf_url,
                 })
 
-        # ── Category: has "category" and "sub category" ───────────────────
+        # ── Category: has "sub category" ──────────────────────────────────
         elif not category and "sub category" in t and len(t) < 300:
             category = _kv_table(tbl)
 
@@ -491,35 +504,43 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                     if cells:
                         documents.append({hdrs[i]: _text(cells[i]) for i in range(min(len(hdrs), len(cells)))})
 
-    # ── Parties (span-based, unchanged) ───────────────────────────────────────
-    def _party_lines(cls: str) -> list[str]:
-        span = soup.find("span", class_=cls)
-        if not span:
-            return []
-        for br in span.find_all("br"):
-            br.replace_with("\n")
-        lines = [_html.unescape(ln.strip()) for ln in span.get_text().split("\n")]
-        return [ln for ln in lines if ln]
+    # ── Subordinate Court: span.Lower_court_table ─────────────────────────────
+    # Structure: <span>FIELD</span><label>: VALUE</label><br/>...
+    for span in soup.find_all("span", class_="Lower_court_table"):
+        children = list(span.children)
+        for i, child in enumerate(children):
+            if not hasattr(child, "name") or child.name != "span":
+                continue
+            field = _html.unescape(child.get_text(strip=True)).rstrip(":").strip()
+            if not field or len(field) > 60:
+                continue
+            # Find the very next <label> sibling
+            for j in range(i + 1, min(i + 4, len(children))):
+                sib = children[j]
+                if hasattr(sib, "name") and sib.name == "label":
+                    # Take only first text node — avoids picking up nested span content
+                    first_text = next(sib.strings, "")
+                    value = _clean_val(_html.unescape(first_text))
+                    if value and value not in ("--", "-"):
+                        sub_court[field] = value
+                    break
+        if sub_court:
+            break
 
-    def _party_lines_any(classes: list[str]) -> list[str]:
-      for cls in classes:
-        lines = _party_lines(cls)
-        if lines:
-          return lines
-      return []
+    # ── Parties: span.Petitioner_Advocate_table / Respondent_Advocate_table ──
+    def _party_lines_by_class(cls: str) -> list[str]:
+        lines: list[str] = []
+        for span in soup.find_all("span", class_=cls):
+            for br in span.find_all("br"):
+                br.replace_with("\n")
+            for line in _html.unescape(span.get_text()).split("\n"):
+                line = line.strip()
+                if line:
+                    lines.append(line)
+        return lines
 
-    petitioners = _party_lines_any([
-      "Petitioner",
-      "petitioner",
-      "Petitioner_Name",
-      "petitioner_name",
-    ])
-    respondents = _party_lines_any([
-      "Respondent",
-      "respondent",
-      "Respondent_Name",
-      "respondent_name",
-    ])
+    petitioners = _party_lines_by_class("Petitioner_Advocate_table")
+    respondents = _party_lines_by_class("Respondent_Advocate_table")
 
     return {
         "cino": cino,
