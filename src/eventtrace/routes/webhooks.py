@@ -280,8 +280,6 @@ def _handle_telegram_start(db: Any, chat_id: int, tg_user: dict, text: str) -> N
     except Exception:
         user_found = False
 
-    bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "SuperSahayakLegalBot")
-
     if user_found:
         name = linked_user.get("name") or first_name or "there"
         reply = (

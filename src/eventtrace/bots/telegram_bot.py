@@ -421,7 +421,7 @@ async def _handle_deep_link_watch(
     update: Update, ctx: ContextTypes.DEFAULT_TYPE, payload: str
 ) -> None:
     """Handle /start watch_<room>_<serial>_<ahead>_<date> from UI deep link."""
-    db: DB = ctx.bot_data["db"]
+    db = ctx.bot_data["db"]
     telegram_id = str(update.effective_user.id)
 
     # payload = "watch_8_205_5_2026-04-25"
