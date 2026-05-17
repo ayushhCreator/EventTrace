@@ -133,14 +133,11 @@ def _page_url(state_cd: str, court_code: str) -> str:
 
 
 def _solve_captcha(image_bytes: bytes, api_key: str) -> str:
-    import anthropic
-
     b64 = base64.standard_b64encode(image_bytes).decode()
-    client = anthropic.Anthropic(api_key=api_key)
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=20,
-        messages=[
+    payload = {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 20,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -158,8 +155,19 @@ def _solve_captcha(image_bytes: bytes, api_key: str) -> str:
                 ],
             }
         ],
+    }
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json=payload,
+        timeout=30,
     )
-    return msg.content[0].text.strip()
+    resp.raise_for_status()
+    return resp.json()["content"][0]["text"].strip()
 
 
 def _parse_tilde_response(raw: str) -> list[dict[str, Any]]:
