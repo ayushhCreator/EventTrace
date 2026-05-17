@@ -281,14 +281,25 @@ class User(Base):
 
     id = Column(String, primary_key=True)
     phone = Column(String, nullable=False, unique=True)
+    phone_hash = Column(String(64), nullable=True, unique=True, index=True)
+    phone_encrypted = Column(Text, nullable=True)
     whatsapp_number = Column(String, nullable=True)
     email = Column(String, nullable=True)
+    email_valid = Column(Integer, nullable=False, default=1)
     name = Column(String, nullable=True)
     role = Column(String, nullable=False, default="client")
     tier = Column(String, nullable=False, default="free")
     verified = Column(Integer, nullable=False, default=0)
     email_verified = Column(Integer, nullable=False, default=0)
+    telegram_chat_id = Column(BigInteger, nullable=True)
+    telegram_username = Column(String(100), nullable=True)
+    preferred_channel = Column(String(20), nullable=False, default="both")
+    quiet_hours_start = Column(String(5), nullable=False, default="22:00")
+    quiet_hours_end = Column(String(5), nullable=False, default="07:00")
+    max_notifications_per_day = Column(Integer, nullable=False, default=10)
+    unsubscribe_token = Column(String(64), nullable=True, unique=True)
     created_at = Column(String, nullable=False)
+    last_login_at = Column(String, nullable=True)
     notification_prefs = Column(Text, nullable=True)
     bar_enrollment_number = Column(String, nullable=True)
     firm_name = Column(String, nullable=True)
@@ -599,4 +610,149 @@ class EcourtsCaseTypeMap(Base):
     __table_args__ = (
         UniqueConstraint("state_cd", "court_code", "type_id", name="uq_ecourts_type"),
         Index("idx_ecourts_type_prefix", "state_cd", "court_code", "prefix"),
+    )
+
+
+# ── Phase 1A: New tables ──────────────────────────────────────────────────────
+
+
+class CauselistEntry(Base):
+    """Flat table for unified full-text search across causelist data.
+
+    Populated from causelist_bench+case during scrape. Separate from
+    causelist_bench/causelist_case (which are the normalised source tables).
+    search_vector is TEXT here; migration creates the actual TSVECTOR + GIN
+    index on Postgres via op.execute().
+    """
+    __tablename__ = "causelist_entries"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    case_number = Column(String(100), nullable=True)
+    serial_number = Column(Integer, nullable=True)
+    court_id = Column(String(50), nullable=True)
+    bench_id = Column(String(50), nullable=True)
+    judge_name = Column(String(255), nullable=True)
+    petitioner = Column(Text, nullable=True)
+    respondent = Column(Text, nullable=True)
+    advocate_petitioner = Column(Text, nullable=True)
+    advocate_respondent = Column(Text, nullable=True)
+    hearing_date = Column(String(10), nullable=True)
+    item_number = Column(Integer, nullable=True)
+    source_url = Column(Text, nullable=True)
+    raw_storage_path = Column(Text, nullable=True)
+    scraped_at = Column(String, nullable=False)
+    parser_version = Column(String(10), nullable=False, default="1.0")
+    search_vector = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_ce_court_date", "court_id", "hearing_date"),
+        Index("idx_ce_case_number", "case_number"),
+    )
+
+
+class VcLink(Base):
+    """Verified VC join links per (court_id, bench_id).
+
+    A VC link is only sent to users when verified=True AND
+    last_verified_at is within 7 days.
+    """
+    __tablename__ = "vc_links"
+
+    id = Column(String(36), primary_key=True)
+    court_id = Column(String(50), nullable=False)
+    bench_id = Column(String(50), nullable=False)
+    room_id = Column(String(100), nullable=True)
+    vc_link = Column(Text, nullable=False)
+    verified = Column(Integer, nullable=False, default=0)
+    last_verified_at = Column(String, nullable=True)
+    source = Column(String(255), nullable=True)
+    added_by = Column(String(255), nullable=True)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("court_id", "bench_id", name="uq_vc_links_court_bench"),
+        Index("idx_vc_links_court", "court_id"),
+        Index("idx_vc_links_verified", "verified", "last_verified_at"),
+    )
+
+
+class VcLinkDeliveryLog(Base):
+    """Audit log of every VC link sent to a user."""
+    __tablename__ = "vc_link_delivery_log"
+
+    id = Column(String(36), primary_key=True)
+    notification_id = Column(String(36), nullable=True)
+    case_number = Column(String(100), nullable=True)
+    vc_link_sent = Column(Text, nullable=True)
+    matched_court_id = Column(String(50), nullable=True)
+    matched_bench = Column(String(50), nullable=True)
+    confidence = Column(String(10), nullable=True)
+    delivered_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_vcdl_case", "case_number"),
+        Index("idx_vcdl_delivered_at", "delivered_at"),
+    )
+
+
+class DisplayBoardSnapshot(Base):
+    """Point-in-time snapshot of a court's display board state."""
+    __tablename__ = "display_board_snapshots"
+
+    id = Column(String(36), primary_key=True)
+    court_id = Column(String(50), nullable=False)
+    bench_id = Column(String(50), nullable=True)
+    snapshot_json = Column(Text, nullable=False)
+    diff_from_previous = Column(Text, nullable=True)
+    captured_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_dbs_court_time", "court_id", "captured_at"),
+    )
+
+
+class AdminAlert(Base):
+    """System alerts for admin monitoring.
+
+    Inserted by: scraper 429 events, stale VC links, service health failures,
+    high notification failure rates, deep queue depth.
+    """
+    __tablename__ = "admin_alerts"
+
+    id = Column(String(36), primary_key=True)
+    alert_type = Column(String(50), nullable=False)
+    severity = Column(String(20), nullable=False, default="WARNING")
+    message = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    resolved = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_admin_alerts_type", "alert_type"),
+        Index("idx_admin_alerts_resolved_at", "resolved", "created_at"),
+    )
+
+
+class ReconciliationResult(Base):
+    """Result of matching a causelist entry against a display board snapshot."""
+    __tablename__ = "reconciliation_results"
+
+    id = Column(String(36), primary_key=True)
+    causelist_entry_id = Column(
+        BigInteger, ForeignKey("causelist_entries.id", ondelete="SET NULL"), nullable=True
+    )
+    display_board_snapshot_id = Column(
+        String(36), ForeignKey("display_board_snapshots.id", ondelete="SET NULL"), nullable=True
+    )
+    confidence = Column(String(10), nullable=False)
+    matched_fields = Column(Text, nullable=True)
+    vc_link_id = Column(
+        String(36), ForeignKey("vc_links.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_recon_confidence", "confidence"),
+        Index("idx_recon_created_at", "created_at"),
     )

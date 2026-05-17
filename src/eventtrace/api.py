@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from .core import metrics as _metrics  # noqa: F401 — registers all counters
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -67,6 +70,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics():
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     app.include_router(health_router)
     app.include_router(display_router)
