@@ -62,28 +62,27 @@ def _make_vc(court_id="C1", bench_id="B1", verified=True, days_since_verify=0, v
 
 def test_vc_confidence_high_on_all_three_match():
     """HIGH when court_id + bench_id + hearing_date all match."""
-    from eventtrace.services.vc_mapper import _score_confidence
+    from eventtrace.services.vc_mapper import score_confidence
 
     vc = {"court_id": "C1", "bench_id": "B1", "hearing_date": "2026-05-17"}
-    assert _score_confidence("C1", "B1", "2026-05-17", vc) == "HIGH"
+    assert score_confidence("C1", "B1", "2026-05-17", vc) == "HIGH"
 
 
 def test_vc_confidence_medium_on_two_match():
     """MEDIUM when court_id + bench_id match but hearing_date absent on vc row."""
-    from eventtrace.services.vc_mapper import _score_confidence
+    from eventtrace.services.vc_mapper import score_confidence
 
     vc = {"court_id": "C1", "bench_id": "B1", "hearing_date": None}
-    # Only court_id and bench_id match (2 fields)
-    result = _score_confidence("C1", "B1", "2026-05-17", vc)
+    result = score_confidence("C1", "B1", "2026-05-17", vc)
     assert result == "MEDIUM"
 
 
 def test_vc_confidence_low_on_one_match():
     """LOW when only court_id matches."""
-    from eventtrace.services.vc_mapper import _score_confidence
+    from eventtrace.services.vc_mapper import score_confidence
 
     vc = {"court_id": "C1", "bench_id": "WRONG", "hearing_date": "2000-01-01"}
-    assert _score_confidence("C1", "B1", "2026-05-17", vc) == "LOW"
+    assert score_confidence("C1", "B1", "2026-05-17", vc) == "LOW"
 
 
 def test_stale_vc_link_triggers_admin_alert():
@@ -188,7 +187,7 @@ def test_reconciliation_creates_result_row():
     }
 
     from eventtrace.services.reconciliation import reconcile_entry
-    result = reconcile_entry(db, entry, snapshot)
+    result = reconcile_entry(db, entry, snapshot, source_court="CHD")
 
     assert result["confidence"] == "HIGH"
     assert "court_id" in result["matched_fields"]

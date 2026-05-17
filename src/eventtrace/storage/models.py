@@ -627,6 +627,7 @@ class CauselistEntry(Base):
     __tablename__ = "causelist_entries"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_court = Column(String(10), nullable=False, default="CHD")
     case_number = Column(String(100), nullable=True)
     serial_number = Column(Integer, nullable=True)
     court_id = Column(String(50), nullable=True)
@@ -645,7 +646,7 @@ class CauselistEntry(Base):
     search_vector = Column(Text, nullable=True)
 
     __table_args__ = (
-        Index("idx_ce_court_date", "court_id", "hearing_date"),
+        Index("idx_ce_source_court_date", "source_court", "court_id", "hearing_date"),
         Index("idx_ce_case_number", "case_number"),
     )
 
@@ -659,6 +660,7 @@ class VcLink(Base):
     __tablename__ = "vc_links"
 
     id = Column(String(36), primary_key=True)
+    source_court = Column(String(10), nullable=False, default="CHD")
     court_id = Column(String(50), nullable=False)
     bench_id = Column(String(50), nullable=False)
     room_id = Column(String(100), nullable=True)
@@ -671,8 +673,8 @@ class VcLink(Base):
     updated_at = Column(String, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("court_id", "bench_id", name="uq_vc_links_court_bench"),
-        Index("idx_vc_links_court", "court_id"),
+        UniqueConstraint("source_court", "court_id", "bench_id", name="uq_vc_links_court_bench"),
+        Index("idx_vc_links_source_court", "source_court", "court_id"),
         Index("idx_vc_links_verified", "verified", "last_verified_at"),
     )
 
@@ -682,6 +684,7 @@ class VcLinkDeliveryLog(Base):
     __tablename__ = "vc_link_delivery_log"
 
     id = Column(String(36), primary_key=True)
+    source_court = Column(String(10), nullable=False, default="CHD")
     notification_id = Column(String(36), nullable=True)
     case_number = Column(String(100), nullable=True)
     vc_link_sent = Column(Text, nullable=True)
@@ -691,7 +694,7 @@ class VcLinkDeliveryLog(Base):
     delivered_at = Column(String, nullable=False)
 
     __table_args__ = (
-        Index("idx_vcdl_case", "case_number"),
+        Index("idx_vcdl_source_court", "source_court", "case_number"),
         Index("idx_vcdl_delivered_at", "delivered_at"),
     )
 
@@ -701,6 +704,7 @@ class DisplayBoardSnapshot(Base):
     __tablename__ = "display_board_snapshots"
 
     id = Column(String(36), primary_key=True)
+    source_court = Column(String(10), nullable=False, default="CHD")
     court_id = Column(String(50), nullable=False)
     bench_id = Column(String(50), nullable=True)
     snapshot_json = Column(Text, nullable=False)
@@ -708,7 +712,7 @@ class DisplayBoardSnapshot(Base):
     captured_at = Column(String, nullable=False)
 
     __table_args__ = (
-        Index("idx_dbs_court_time", "court_id", "captured_at"),
+        Index("idx_dbs_source_court_time", "source_court", "court_id", "captured_at"),
     )
 
 
@@ -721,6 +725,7 @@ class AdminAlert(Base):
     __tablename__ = "admin_alerts"
 
     id = Column(String(36), primary_key=True)
+    source_court = Column(String(10), nullable=True)
     alert_type = Column(String(50), nullable=False)
     severity = Column(String(20), nullable=False, default="WARNING")
     message = Column(Text, nullable=False)
@@ -730,7 +735,7 @@ class AdminAlert(Base):
 
     __table_args__ = (
         Index("idx_admin_alerts_type", "alert_type"),
-        Index("idx_admin_alerts_resolved_at", "resolved", "created_at"),
+        Index("idx_admin_alerts_source_court", "source_court", "resolved", "created_at"),
     )
 
 
@@ -739,6 +744,7 @@ class ReconciliationResult(Base):
     __tablename__ = "reconciliation_results"
 
     id = Column(String(36), primary_key=True)
+    source_court = Column(String(10), nullable=False, default="CHD")
     causelist_entry_id = Column(
         BigInteger, ForeignKey("causelist_entries.id", ondelete="SET NULL"), nullable=True
     )
@@ -753,6 +759,6 @@ class ReconciliationResult(Base):
     created_at = Column(String, nullable=False)
 
     __table_args__ = (
-        Index("idx_recon_confidence", "confidence"),
+        Index("idx_recon_source_court_conf", "source_court", "confidence"),
         Index("idx_recon_created_at", "created_at"),
     )

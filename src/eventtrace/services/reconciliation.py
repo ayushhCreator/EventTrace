@@ -1,12 +1,16 @@
 """Reconciliation job — match causelist entries against display board snapshots.
 
-Spec §MODULE 1 (confidence scoring):
+Confidence scoring (spec §MODULE 1):
   Match on (court_id, case_number, hearing_date):
-    3/3 → HIGH   — auto-approve for notification
-    2/3 → MEDIUM — flag for admin review, hold VC link
-    1/3 → LOW    — do not use for notification at all
+    3/3 → HIGH   → auto-approve for notification
+    2/3 → MEDIUM → flag for admin review, hold VC link
+    1/3 → LOW    → skip entirely
 
-Writes one ReconciliationResult row per matched pair.
+SOLID:
+  - Single Responsibility: pure _score() is separate from I/O reconcile_entry().
+  - Open/Closed: add a new field to scoring by extending _SCORE_EXTRACTORS,
+    no changes to reconcile_entry.
+DRY: _parse_snapshot_json() used in both _score() and run_reconciliation_batch().
 """
 
 from __future__ import annotations
@@ -20,39 +24,69 @@ import structlog
 
 log = structlog.get_logger()
 
+# ── Field extractors (Open/Closed) ────────────────────────────────────────────
+# Each extractor returns (entry_val, snap_val) as normalised strings.
+# Add a new entry here to score on an additional field — zero changes elsewhere.
 
-def _score(entry: dict, snapshot_data: dict) -> tuple[str, list[str]]:
-    """Score one causelist entry against one display board snapshot payload.
+def _norm(s: str | None) -> str:
+    return (s or "").strip().lower().replace(" ", "")
 
-    snapshot_data: parsed JSON from DisplayBoardSnapshot.snapshot_json.
-    Returns (confidence, matched_fields_list).
+
+_SCORE_EXTRACTORS = [
+    (
+        "court_id",
+        lambda e, s: _norm(e.get("court_id")),
+        lambda e, s: _norm(s.get("court_id") or s.get("court_no")),
+    ),
+    (
+        "case_number",
+        lambda e, s: _norm(e.get("case_number")),
+        lambda e, s: _norm(s.get("case_number") or s.get("case_ref")),
+    ),
+    (
+        "hearing_date",
+        lambda e, s: (e.get("hearing_date") or "").strip(),
+        lambda e, s: (s.get("hearing_date") or s.get("list_date") or "").strip(),
+    ),
+]
+
+
+# ── Pure functions ────────────────────────────────────────────────────────────
+
+
+def _parse_snapshot_json(raw: str | dict | None) -> dict:
+    """Safely parse snapshot_json from string or passthrough if already dict."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def score(entry: dict, snap_data: dict) -> tuple[str, list[str]]:
+    """Return (confidence, matched_fields) for one entry/snapshot pair.
+
+    Pure function — no I/O. Fully testable.
     """
     matched: list[str] = []
-
-    entry_court = (entry.get("court_id") or "").strip().lower()
-    snap_court = (snapshot_data.get("court_id") or snapshot_data.get("court_no") or "").strip().lower()
-    if entry_court and snap_court and entry_court == snap_court:
-        matched.append("court_id")
-
-    entry_case = (entry.get("case_number") or "").strip().lower().replace(" ", "")
-    snap_case = (snapshot_data.get("case_number") or snapshot_data.get("case_ref") or "").strip().lower().replace(" ", "")
-    if entry_case and snap_case and entry_case == snap_case:
-        matched.append("case_number")
-
-    entry_date = (entry.get("hearing_date") or "").strip()
-    snap_date = (snapshot_data.get("hearing_date") or snapshot_data.get("list_date") or "").strip()
-    if entry_date and snap_date and entry_date == snap_date:
-        matched.append("hearing_date")
+    for field_name, get_entry, get_snap in _SCORE_EXTRACTORS:
+        ev = get_entry(entry, snap_data)
+        sv = get_snap(entry, snap_data)
+        if ev and sv and ev == sv:
+            matched.append(field_name)
 
     n = len(matched)
     if n >= 3:
-        confidence = "HIGH"
-    elif n == 2:
-        confidence = "MEDIUM"
-    else:
-        confidence = "LOW"
+        return "HIGH", matched
+    if n == 2:
+        return "MEDIUM", matched
+    return "LOW", matched
 
-    return confidence, matched
+
+# ── I/O ───────────────────────────────────────────────────────────────────────
 
 
 def reconcile_entry(
@@ -60,28 +94,22 @@ def reconcile_entry(
     causelist_entry: dict,
     snapshot: dict,
     vc_link_id: str | None = None,
+    source_court: str = "CHD",
 ) -> dict:
     """Reconcile one causelist entry against one display board snapshot.
 
-    causelist_entry: dict with keys: id, court_id, case_number, hearing_date
-    snapshot: dict with keys: id, snapshot_json (JSON string or dict)
-
-    Returns the created ReconciliationResult as a dict.
+    Writes a ReconciliationResult row regardless of confidence (caller filters).
+    Returns the result dict.
     """
-    snap_data = snapshot.get("snapshot_json") or {}
-    if isinstance(snap_data, str):
-        try:
-            snap_data = json.loads(snap_data)
-        except Exception:
-            snap_data = {}
-
-    confidence, matched_fields = _score(causelist_entry, snap_data)
+    snap_data = _parse_snapshot_json(snapshot.get("snapshot_json"))
+    confidence, matched_fields = score(causelist_entry, snap_data)
     now = datetime.now(timezone.utc).isoformat()
     result_id = str(uuid.uuid4())
 
     try:
         db.create_reconciliation_result(
             id=result_id,
+            source_court=source_court,
             causelist_entry_id=causelist_entry.get("id"),
             display_board_snapshot_id=snapshot.get("id"),
             confidence=confidence,
@@ -94,12 +122,14 @@ def reconcile_entry(
             result_id=result_id,
             confidence=confidence,
             matched_fields=matched_fields,
+            source_court=source_court,
         )
     except Exception as exc:
         log.error("reconciliation: db write failed", exc=str(exc))
 
     return {
         "id": result_id,
+        "source_court": source_court,
         "causelist_entry_id": causelist_entry.get("id"),
         "display_board_snapshot_id": snapshot.get("id"),
         "confidence": confidence,
@@ -114,35 +144,35 @@ def run_reconciliation_batch(
     entries: list[dict],
     snapshots: list[dict],
     vc_link_id: str | None = None,
+    source_court: str = "CHD",
 ) -> list[dict]:
-    """Reconcile a batch of causelist entries against display board snapshots.
+    """Find best snapshot per entry; write result only for HIGH or MEDIUM matches.
 
-    For each entry, finds the best-matching snapshot (highest confidence).
-    Only writes a result row when confidence is HIGH or MEDIUM.
-    Returns list of result dicts.
+    O(n*m) — fine for court-day-sized batches (hundreds of entries).
     """
+    _WRITE_CONFIDENCES = frozenset(("HIGH", "MEDIUM"))
     results: list[dict] = []
+
+    # Pre-parse all snapshot JSONs once (DRY — avoids re-parsing per entry)
+    parsed_snaps = [
+        (snap, _parse_snapshot_json(snap.get("snapshot_json")))
+        for snap in snapshots
+    ]
+
     for entry in entries:
-        best_conf = "LOW"
-        best_snap: dict | None = None
-        best_fields: list[str] = []
+        best: tuple[str, dict, list[str]] | None = None  # (confidence, snap, fields)
 
-        for snap in snapshots:
-            snap_data = snap.get("snapshot_json") or {}
-            if isinstance(snap_data, str):
-                try:
-                    snap_data = json.loads(snap_data)
-                except Exception:
-                    snap_data = {}
-            conf, fields = _score(entry, snap_data)
+        for snap, snap_data in parsed_snaps:
+            conf, fields = score(entry, snap_data)
             if conf == "HIGH":
-                best_conf, best_snap, best_fields = conf, snap, fields
+                best = (conf, snap, fields)
                 break
-            if conf == "MEDIUM" and best_conf != "HIGH":
-                best_conf, best_snap, best_fields = conf, snap, fields
+            if conf == "MEDIUM" and (best is None or best[0] != "HIGH"):
+                best = (conf, snap, fields)
 
-        if best_snap is not None and best_conf in ("HIGH", "MEDIUM"):
-            result = reconcile_entry(db, entry, best_snap, vc_link_id)
+        if best and best[0] in _WRITE_CONFIDENCES:
+            _, best_snap, _ = best
+            result = reconcile_entry(db, entry, best_snap, vc_link_id, source_court)
             results.append(result)
 
     log.info(
@@ -150,5 +180,6 @@ def run_reconciliation_batch(
         entries=len(entries),
         snapshots=len(snapshots),
         results=len(results),
+        source_court=source_court,
     )
     return results

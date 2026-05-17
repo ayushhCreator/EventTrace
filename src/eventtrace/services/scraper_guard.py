@@ -59,11 +59,11 @@ class ScraperGuard:
         while not self.acquire(domain):
             time.sleep(poll_interval)
 
-    def record_429(self, domain: str, db: Any) -> int:
+    def record_429(self, domain: str, db: Any, source_court: str | None = None) -> int:
         """Increment consecutive-429 counter for domain.
 
-        Returns the new count. When count reaches MAX_CONSECUTIVE_429S,
-        fires an admin alert and returns the count.
+        Returns the new count. Fires admin alert when count reaches MAX_CONSECUTIVE_429S.
+        source_court: e.g. "CHD" — forwarded to admin alert for filtering.
         """
         count = 1
         if self._r is not None:
@@ -75,7 +75,7 @@ class ScraperGuard:
             except Exception as exc:
                 log.warning("scraper_guard.record_429 redis failed", exc=str(exc))
 
-        log.warning("scraper: HTTP 429 received", domain=domain, consecutive_count=count)
+        log.warning("scraper: HTTP 429 received", domain=domain, consecutive_count=count, source_court=source_court)
 
         if count >= _MAX_CONSECUTIVE_429S:
             msg = (
@@ -88,6 +88,7 @@ class ScraperGuard:
                 message=msg,
                 severity="ERROR",
                 metadata={"domain": domain, "consecutive_429s": count},
+                source_court=source_court,
             )
 
         return count
@@ -101,9 +102,9 @@ class ScraperGuard:
         except Exception:
             pass
 
-    def backoff_429(self, domain: str, db: Any) -> None:
+    def backoff_429(self, domain: str, db: Any, source_court: str | None = None) -> None:
         """Record 429 then sleep BACKOFF_SECONDS."""
-        self.record_429(domain, db)
+        self.record_429(domain, db, source_court=source_court)
         log.info("scraper: backing off", domain=domain, seconds=_BACKOFF_SECONDS)
         time.sleep(_BACKOFF_SECONDS)
 
