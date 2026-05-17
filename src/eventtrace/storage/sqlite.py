@@ -810,6 +810,9 @@ class DB:
             quiet_hours_end=quiet_hours_end,
         )
 
+    def get_causelist_alert_status(self, user_id: str, case_ref: str) -> bool:
+        return self._notifications.get_causelist_alert_status(user_id, case_ref)
+
     def log_search(
         self,
         query_type: str,

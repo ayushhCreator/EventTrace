@@ -512,6 +512,13 @@ class SQLAlchemyNotificationRepository:
         # Should always be found after upsert
         return result or {}
 
+    def get_causelist_alert_status(self, user_id: str, case_ref: str) -> bool:
+        """Return True if user has an active case_in_causelist alert pref."""
+        row = self.get_alert_pref(user_id, case_ref, "case_in_causelist")
+        if row is None:
+            return False
+        return bool(row.get("enabled", 0))
+
     # ── Search Log ────────────────────────────────────────────────────────────
 
     def log_search(

@@ -45,16 +45,35 @@ _DEDUP_HOURS: dict[str, int] = {
 def build_message(trigger_type: str, context: dict) -> str:
     case_ref = context.get("case_ref", "")
     if trigger_type == "case_in_causelist":
-        parts = [f"📋 *{case_ref}* listed for {context.get('date', '')}"]
+        date_label = context.get("date_label") or context.get("date", "")
+        date_raw = context.get("date", "")
+        label = f"{date_label} ({date_raw})" if date_label != date_raw and date_raw else date_label
+        parts = [f"📋 *{case_ref}* listed for {label}"]
+        court_serial = []
         if context.get("court_no"):
-            parts.append(f"Court {context['court_no']}")
-        if context.get("section"):
-            parts.append(f"Section: {context['section']}")
+            court_serial.append(f"Court {context['court_no']}")
         if context.get("serial_no"):
-            parts.append(f"Serial #{context['serial_no']}")
+            court_serial.append(f"Serial #{context['serial_no']}")
+        if court_serial:
+            parts.append(" • ".join(court_serial))
         if context.get("bench_label"):
             parts.append(f"Bench: {context['bench_label']}")
-        if context.get("vc_link"):
+        if context.get("section"):
+            parts.append(f"Section: {context['section']}")
+        parties = []
+        if context.get("petitioner"):
+            parties.append(context["petitioner"])
+        if context.get("respondent"):
+            parties.append(f"vs {context['respondent']}")
+        if parties:
+            parts.append(" ".join(parties))
+        if context.get("advocate"):
+            parts.append(f"Advocate: {context['advocate']}")
+        if context.get("judges"):
+            parts.append(f"Judge: {context['judges']}")
+        if context.get("case_url"):
+            parts.append(f"🔗 {context['case_url']}")
+        elif context.get("vc_link"):
             parts.append(f"VC: {context['vc_link']}")
         return "\n".join(parts)
 

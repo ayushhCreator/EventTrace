@@ -411,11 +411,18 @@ def _build_plain_text(trigger_type: str, context: dict, case_ref: str) -> str:
 def build_email_html(trigger_type: str, context: dict, case_ref: str, unsubscribe_url: str = "") -> str:
     if trigger_type == "case_in_causelist":
         date = context.get("date", "")
+        date_label = context.get("date_label") or date
+        label = f"{date_label} ({date})" if date_label != date and date else date_label
         court = context.get("court_no", "")
         serial = context.get("serial_no", "")
         bench = context.get("bench_label", "")
         section = context.get("section", "")
         vc_link = context.get("vc_link", "")
+        petitioner = context.get("petitioner", "")
+        respondent = context.get("respondent", "")
+        advocate = context.get("advocate", "")
+        judges = context.get("judges", "")
+        case_url = context.get("case_url", "")
 
         rows = ""
         if court:
@@ -426,22 +433,35 @@ def build_email_html(trigger_type: str, context: dict, case_ref: str, unsubscrib
             rows += _kv_row("Bench", bench)
         if section:
             rows += _kv_row("Section", section)
+        if petitioner:
+            rows += _kv_row("Petitioner", petitioner)
+        if respondent:
+            rows += _kv_row("Respondent", respondent)
+        if advocate:
+            rows += _kv_row("Advocate", advocate)
+        if judges:
+            rows += _kv_row("Judge(s)", judges)
         if date:
-            rows += _kv_row("Hearing date", date)
+            rows += _kv_row("Hearing date", label)
 
-        vc_html = ""
-        if vc_link:
-            vc_html = (
-                f'<p style="margin:20px 0 0;"><a href="{vc_link}" '
-                f'style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">Join VC</a></p>'
+        action_url = case_url or vc_link
+        action_label = "View on SuperSahayak Legal" if case_url else "Join VC"
+        action_html = (
+            f'<p style="margin:20px 0 0;"><a href="{action_url}" '
+            f'style="background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">{action_label} →</a></p>'
+        ) if action_url else ""
+        if case_url and vc_link:
+            action_html += (
+                f'<p style="margin:10px 0 0;"><a href="{vc_link}" '
+                f'style="background:#4f46e5;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">Join VC</a></p>'
             )
 
         body = (
             f'<h2 style="margin:0 0 8px;color:#1a1a2e;font-size:20px;">📋 Case Listed</h2>'
             f'<p style="margin:0 0 20px;color:#444;font-size:15px;">'
-            f'<strong>{case_ref}</strong> is listed for hearing on <strong>{date}</strong>.</p>'
+            f'<strong>{case_ref}</strong> is listed for hearing on <strong>{label}</strong>.</p>'
             f'<table cellpadding="0" cellspacing="0" style="width:100%;border-top:1px solid #e8e8e8;padding-top:16px;">'
-            f'{rows}</table>{vc_html}'
+            f'{rows}</table>{action_html}'
         )
 
     elif trigger_type == "serial_reached":

@@ -45,7 +45,14 @@ def list_my_cases(
     current_user: dict = Depends(_current_user),
     db: Any = Depends(get_db),
 ) -> list[dict]:
-    return db.list_tracked_cases(current_user["id"])
+    user_id = str(current_user["id"])
+    cases = db.list_tracked_cases(user_id)
+    for c in cases:
+        try:
+            c["causelist_alert"] = db.get_causelist_alert_status(user_id, c["case_ref"])
+        except Exception:
+            c["causelist_alert"] = False
+    return cases
 
 
 @router.post("", status_code=201)
@@ -254,6 +261,49 @@ def fetch_ecourts(
 
     threading.Thread(target=_bg, daemon=True, name=f"ecourts-fetch-{case_ref}").start()
     return {"status": "fetching"}
+
+
+@router.post("/{case_ref:path}/notify", status_code=200)
+def subscribe_causelist_alert(
+    case_ref: str,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    """Subscribe to case_in_causelist notifications for a tracked case.
+    Tracks the case automatically if not already tracked.
+    """
+    user_id = str(current_user["id"])
+
+    # Ensure case is tracked
+    existing = db.get_tracked_case(user_id, case_ref)
+    if not existing:
+        db.track_case(user_id, {"case_ref": case_ref})
+
+    db.upsert_single_alert_pref(user_id, case_ref, "case_in_causelist", enabled=True)
+
+    # Resolve which channels are available for this user
+    user = db.get_user_by_id(user_id) or {}
+    channels = []
+    if user.get("telegram_chat_id"):
+        channels.append("telegram")
+    if user.get("email_verified") and user.get("email") and user.get("email_valid", True):
+        channels.append("email")
+    if not channels:
+        channels = ["pending_setup"]
+
+    return {"subscribed": True, "case_ref": case_ref, "channels": channels}
+
+
+@router.delete("/{case_ref:path}/notify", status_code=200)
+def unsubscribe_causelist_alert(
+    case_ref: str,
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    """Unsubscribe from case_in_causelist notifications for a case."""
+    user_id = str(current_user["id"])
+    db.upsert_single_alert_pref(user_id, case_ref, "case_in_causelist", enabled=False)
+    return {"subscribed": False, "case_ref": case_ref}
 
 
 @router.delete("/{case_ref:path}", status_code=204)

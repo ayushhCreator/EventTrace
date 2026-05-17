@@ -169,6 +169,32 @@ def _send_change_alerts(db: Any, case_ref: str, user_ids: list[str], diff: dict,
                 log.warning("change alert failed user=%s case=%s trigger=%s: %s", user_id, case_ref, ttype, exc)
 
 
+def _date_label(date_str: str) -> str:
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(date_str)
+        today = _date.today()
+        delta = (d - today).days
+        if delta == 0:
+            return "Today"
+        if delta == 1:
+            return "Tomorrow"
+        return date_str
+    except Exception:
+        return date_str
+
+
+def _parse_judges(judges_json: Any) -> str:
+    import json as _json
+    if not judges_json:
+        return ""
+    try:
+        judges = _json.loads(judges_json) if isinstance(judges_json, str) else judges_json
+        return ", ".join(j.get("full_name") or j.get("normalized_name") or str(j) for j in judges if j)
+    except Exception:
+        return str(judges_json)
+
+
 def run_causelist_alert_scan(db: Any, date: str) -> None:
     from .notification_dispatch import enqueue_notification
 
@@ -176,6 +202,8 @@ def run_causelist_alert_scan(db: Any, date: str) -> None:
     if not case_refs:
         return
     log.info("run_causelist_alert_scan: %d case_refs for %s", len(case_refs), date)
+
+    date_label = _date_label(date)
 
     for case_ref in case_refs:
         try:
@@ -193,6 +221,11 @@ def run_causelist_alert_scan(db: Any, date: str) -> None:
         for row in results:
             court_no = row.get("court_no", "")
             serial_no = row.get("serial_no")
+            case_url = (
+                f"https://legal.supersahayak.com/causelist/{date}/court/{court_no}/serial/{serial_no}"
+                if court_no and serial_no else
+                f"https://legal.supersahayak.com/causelist/{date}"
+            )
 
             for user_id in users:
                 try:
@@ -203,12 +236,18 @@ def run_causelist_alert_scan(db: Any, date: str) -> None:
                         "case_in_causelist",
                         {
                             "date": date,
+                            "date_label": date_label,
                             "court_no": court_no,
                             "serial_no": serial_no,
                             "section": row.get("section", ""),
                             "subsection": row.get("subsection", ""),
                             "bench_label": row.get("bench_label", ""),
                             "vc_link": row.get("vc_link", ""),
+                            "petitioner": row.get("petitioner", ""),
+                            "respondent": row.get("respondent", ""),
+                            "advocate": row.get("advocate", ""),
+                            "judges": _parse_judges(row.get("judges_json")),
+                            "case_url": case_url,
                         },
                     )
                     db.insert_timeline_event(user_id, case_ref, "case_in_causelist", date)
