@@ -314,10 +314,15 @@ def _do_case_history(
                 continue
             try:
                 pdf_resp = sess.get(pdf_url, timeout=15)
-                ct = pdf_resp.headers.get("content-type", "")
-                if pdf_resp.ok and "pdf" in ct.lower():
+                # Accept PDF by magic bytes or content-type (eCourts may omit proper mime)
+                is_pdf = pdf_resp.content[:4] == b"%PDF" or "pdf" in pdf_resp.headers.get("content-type", "").lower()
+                if pdf_resp.ok and is_pdf:
                     order["pdf_b64"] = base64.standard_b64encode(pdf_resp.content).decode()
                     log.debug("pdf fetched order=%s size=%d", order.get("number"), len(pdf_resp.content))
+                else:
+                    log.warning("pdf_fetch non-pdf: order=%s status=%s ct=%s body_start=%r",
+                                order.get("number"), pdf_resp.status_code,
+                                pdf_resp.headers.get("content-type"), pdf_resp.content[:80])
             except Exception as pdf_err:
                 log.debug("pdf_fetch skip: %s", pdf_err)
 
@@ -357,57 +362,6 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
     def _clean_val(s: str) -> str:
         return _re.sub(r"^[\s: ]+", "", s).strip()
 
-    case_details: dict[str, str] = {}
-    case_status: dict[str, str] = {}
-    acts: list[dict] = []
-    sub_court: dict[str, str] = {}
-    hearings: list[dict] = []
-    orders: list[dict] = []
-    category: dict[str, str] = {}
-    objections: list[dict] = []
-    documents: list[dict] = []
-
-    # ── Case Details: span.case_details_table rows ───────────────────────────
-    # Each outer span is a row; fields are non-":" labels, values are text or ":" labels.
-    for span in soup.find_all("span", class_="case_details_table"):
-        span_text = _html.unescape(span.get_text(" ", strip=True))
-        # Collect field-name labels (those not starting with ":")
-        field_labels = [
-            _html.unescape(lbl.get_text(strip=True))
-            for lbl in span.find_all("label")
-            if not _html.unescape(lbl.get_text(strip=True)).startswith(":")
-            and _html.unescape(lbl.get_text(strip=True)).strip()
-        ]
-        for field in field_labels:
-            field_clean = field.rstrip(":").strip()
-            if not field_clean or field_clean in case_details:
-                continue
-            if field_clean not in span_text:
-                continue
-            after = span_text[span_text.index(field_clean) + len(field_clean):]
-            # Trim at next field boundary
-            for other in field_labels:
-                if other != field and other.rstrip(":").strip() in after:
-                    after = after[: after.index(other.rstrip(":").strip())]
-            value = _clean_val(after).split("  ")[0].strip()
-            if value and len(value) < 120:
-                case_details[field_clean] = value
-
-    # ── Case Status: div immediately after <h2>Case Status</h2> ─────────────
-    # Structure: <label><strong>FIELD</strong><strong>: VALUE</strong></label>
-    for h2 in soup.find_all("h2"):
-        if "case status" in _text(h2).lower():
-            status_div = h2.find_next_sibling("div")
-            if status_div:
-                for label in status_div.find_all("label"):
-                    strongs = label.find_all("strong")
-                    if len(strongs) >= 2:
-                        field = _text(strongs[0]).strip().rstrip(":")
-                        value = _clean_val(_text(strongs[1]))
-                        if field and value:
-                            case_status[field] = value
-            break
-
     def _tbl_text(tbl) -> str:
         return tbl.get_text(" ", strip=True).lower()
 
@@ -421,6 +375,98 @@ def _parse_case_history(raw: str, cino: str) -> dict[str, Any]:
                 if label and value:
                     result[label] = value
         return result
+
+    case_details: dict[str, str] = {}
+    case_status: dict[str, str] = {}
+    acts: list[dict] = []
+    sub_court: dict[str, str] = {}
+    hearings: list[dict] = []
+    orders: list[dict] = []
+    category: dict[str, str] = {}
+    objections: list[dict] = []
+    documents: list[dict] = []
+
+    # ── Case Details: span.case_details_table rows ───────────────────────────
+    for span in soup.find_all("span", class_="case_details_table"):
+        span_text = _html.unescape(span.get_text(" ", strip=True))
+        field_labels = [
+            _html.unescape(lbl.get_text(strip=True))
+            for lbl in span.find_all("label")
+            if not _html.unescape(lbl.get_text(strip=True)).startswith(":")
+            and _html.unescape(lbl.get_text(strip=True)).strip()
+        ]
+        for field in field_labels:
+            field_clean = field.rstrip(":").strip()
+            if not field_clean or field_clean in case_details:
+                continue
+            if field_clean not in span_text:
+                continue
+            after = span_text[span_text.index(field_clean) + len(field_clean):]
+            for other in field_labels:
+                if other != field and other.rstrip(":").strip() in after:
+                    after = after[: after.index(other.rstrip(":").strip())]
+            value = _clean_val(after).split("  ")[0].strip()
+            if value and len(value) < 120:
+                case_details[field_clean] = value
+
+    # ── Case Details fallback: any table with filing/registration/case type ──
+    if not case_details:
+        _detail_skip = {"order number", "cause list type", "under act", "scrutiny date", "document no"}
+        for tbl in soup.find_all("table"):
+            t = _tbl_text(tbl)
+            if any(k in t for k in _detail_skip):
+                continue
+            if any(k in t for k in ("filing", "registration", "case type", "petitioner", "first hearing")):
+                kv = _kv_table(tbl)
+                if 2 <= len(kv) <= 25:
+                    case_details.update(kv)
+                    if len(case_details) >= 2:
+                        break
+
+    # ── Case Status: h1-h5 containing "status", then sibling div/table ──────
+    _status_tags = _re.compile(r"^h[1-5]$")
+    for htag in soup.find_all(_status_tags):
+        if "case status" not in _text(htag).lower():
+            continue
+        # Walk siblings
+        for sib in htag.next_siblings:
+            if not hasattr(sib, "name") or sib.name is None:
+                continue
+            if sib.name in ("h1", "h2", "h3", "h4", "h5"):
+                break
+            if sib.name == "table":
+                case_status = _kv_table(sib)
+                break
+            if sib.name == "div":
+                # <label><strong>FIELD</strong><strong>: VALUE</strong></label> pattern
+                for label in sib.find_all("label"):
+                    strongs = label.find_all("strong")
+                    if len(strongs) >= 2:
+                        field = _text(strongs[0]).strip().rstrip(":")
+                        value = _clean_val(_text(strongs[1]))
+                        if field and value:
+                            case_status[field] = value
+                if not case_status:
+                    inner_tbl = sib.find("table")
+                    if inner_tbl:
+                        case_status = _kv_table(inner_tbl)
+                break
+        if case_status:
+            break
+
+    # ── Case Status fallback: any table with next-hearing / stage keywords ───
+    if not case_status:
+        _status_kw = {"next hearing", "stage of case", "stage_of_case", "date of decision", "first hearing date"}
+        for tbl in soup.find_all("table"):
+            t = _tbl_text(tbl)
+            if any(k in t for k in _status_kw) and "cause list type" not in t and "order number" not in t:
+                kv = _kv_table(tbl)
+                if kv:
+                    case_status.update(kv)
+                    break
+
+    log.debug("parse_case_history case_details_keys=%s case_status_keys=%s",
+              list(case_details.keys()), list(case_status.keys()))
 
     for tbl in soup.find_all("table"):
         t = _tbl_text(tbl)
