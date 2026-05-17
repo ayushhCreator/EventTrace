@@ -87,6 +87,23 @@ def _dispatch_queue_item(db: Any, item: dict) -> bool:
             log.info("retry_worker: no WA provider configured — marking sent (dev)", user_id=user_id)
             sent = True
 
+    elif channel == "telegram":
+        import os
+        from ..core.redis_client import get_redis
+        from .telegram_sender import TelegramSender
+
+        chat_id = user.get("telegram_chat_id")
+        if not chat_id:
+            log.warning("retry_worker: no telegram_chat_id", user_id=user_id)
+            return False
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        if not token:
+            log.warning("retry_worker: TELEGRAM_BOT_TOKEN not set")
+            return False
+        sender = TelegramSender(redis_client=get_redis(), bot_token=token)
+        sent = sender.send(str(chat_id), message, parse_mode="HTML")
+        provider_response = json.dumps({"sent": sent, "provider": "telegram", "chat_id": str(chat_id)})
+
     elif channel == "email":
         email = user.get("email", "")
         if not email or not user.get("email_verified"):
@@ -94,8 +111,13 @@ def _dispatch_queue_item(db: Any, item: dict) -> bool:
         trigger_type = payload.get("trigger_type", "")
         case_ref = payload.get("case_ref", "")
         subject = _email_subject(trigger_type, payload, case_ref)
-        body_html = build_email_html(trigger_type, payload, case_ref)
-        sent = send_email_alert(email, subject, body_html)
+        unsubscribe_token = user.get("unsubscribe_token", "")
+        import os as _os
+        api_url = _os.getenv("CHD_PUBLIC_URL", "").rstrip("/")
+        unsubscribe_url = f"{api_url}/unsubscribe?token={unsubscribe_token}" if unsubscribe_token else ""
+        body_html = build_email_html(trigger_type, payload, case_ref, unsubscribe_url=unsubscribe_url)
+        body_text = payload.get("message_text", message)
+        sent = send_email_alert(email, subject, body_html, body_text=body_text, db=db, user_id=user_id)
         provider_response = json.dumps({"sent": sent, "provider": "resend"})
 
     # Update log status

@@ -371,6 +371,18 @@ class DB:
     def set_whatsapp_verified(self, user_id: str, whatsapp_number: str) -> dict | None:
         return self._auth.set_whatsapp_verified(user_id, whatsapp_number)
 
+    def set_telegram_chat_id_by_username(self, telegram_username: str, chat_id: int) -> None:
+        return self._auth.set_telegram_chat_id_by_username(telegram_username, chat_id)
+
+    def update_user_notification_prefs(self, user_id: str, updates: dict) -> None:
+        return self._auth.update_user_notification_prefs(user_id, updates)
+
+    def set_email_invalid(self, user_id: str) -> None:
+        return self._auth.set_email_invalid(user_id)
+
+    def get_user_by_unsubscribe_token(self, token: str) -> dict | None:
+        return self._auth.get_user_by_unsubscribe_token(token)
+
     def get_user_stats(self) -> dict:
         return self._auth.get_user_stats()
 

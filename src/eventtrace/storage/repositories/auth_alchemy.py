@@ -22,10 +22,12 @@ def _user_to_dict(user: User) -> dict:
     return {
         "id": str(user.id),
         "phone": user.phone,
+        "phone_hash": getattr(user, "phone_hash", None),
         "whatsapp_number": getattr(user, "whatsapp_number", None),
         "whatsapp_verified": bool(getattr(user, "whatsapp_verified", 0)),
         "daily_wa_cap": getattr(user, "daily_wa_cap", 20),
         "email": user.email,
+        "email_valid": bool(getattr(user, "email_valid", 1)),
         "email_verified": bool(user.email_verified),
         "name": user.name,
         "role": user.role,
@@ -36,6 +38,14 @@ def _user_to_dict(user: User) -> dict:
         "firm_name": user.firm_name,
         "secondary_email": user.secondary_email,
         "is_admin": bool(user.is_admin),
+        # Phase 1A notification fields
+        "telegram_chat_id": getattr(user, "telegram_chat_id", None),
+        "telegram_username": getattr(user, "telegram_username", None),
+        "preferred_channel": getattr(user, "preferred_channel", "both"),
+        "quiet_hours_start": getattr(user, "quiet_hours_start", "22:00"),
+        "quiet_hours_end": getattr(user, "quiet_hours_end", "07:00"),
+        "max_notifications_per_day": getattr(user, "max_notifications_per_day", 10),
+        "unsubscribe_token": getattr(user, "unsubscribe_token", None),
     }
 
 
@@ -420,6 +430,54 @@ class SQLAlchemyAuthRepository:
             "with_phone": with_phone,
             "admins": admins,
         }
+
+    # ── Telegram + notification prefs ─────────────────────────────────────────
+
+    def set_telegram_chat_id_by_username(self, telegram_username: str, chat_id: int) -> None:
+        """Link a Telegram chat_id to a user by their telegram_username."""
+        username = telegram_username.lstrip("@").lower()
+        with Session(self._engine) as session:
+            user = session.scalar(
+                select(User).where(
+                    func.lower(User.telegram_username) == username
+                ).limit(1)
+            )
+            if user:
+                user.telegram_chat_id = chat_id
+                session.commit()
+
+    def update_user_notification_prefs(self, user_id: str, updates: dict) -> None:
+        """Partial update of notification preference columns on users table.
+
+        Only columns in the allowed set are updated — prevents arbitrary column injection.
+        """
+        _ALLOWED = frozenset({
+            "preferred_channel", "quiet_hours_start", "quiet_hours_end",
+            "max_notifications_per_day", "telegram_username",
+        })
+        safe = {k: v for k, v in updates.items() if k in _ALLOWED}
+        if not safe:
+            return
+        with Session(self._engine) as session:
+            session.execute(
+                update(User).where(User.id == user_id).values(**safe)
+            )
+            session.commit()
+
+    def set_email_invalid(self, user_id: str) -> None:
+        """Mark a user's email address as invalid (hard bounce / unsubscribe)."""
+        with Session(self._engine) as session:
+            session.execute(
+                update(User).where(User.id == user_id).values(email_valid=0)
+            )
+            session.commit()
+
+    def get_user_by_unsubscribe_token(self, token: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.scalar(
+                select(User).where(User.unsubscribe_token == token).limit(1)
+            )
+            return _user_to_dict(user) if user else None
 
     def list_all_users_with_stats(self) -> list[dict]:
         from sqlalchemy import text

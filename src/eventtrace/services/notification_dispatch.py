@@ -160,26 +160,34 @@ def enqueue_notification(
         log.debug("notification skipped: quiet hours", user_id=user_id, trigger=trigger_type)
         return False
 
-    effective_channel = channel or (pref.get("channel") if pref else None) or "whatsapp"
+    # preferred_channel from user profile takes precedence over per-case pref
+    user_preferred = user.get("preferred_channel") or "both"
+    effective_channel = channel or (pref.get("channel") if pref else None) or user_preferred
 
-    channels_to_send: list[str] = []
-    if effective_channel == "both":
-        channels_to_send = ["whatsapp", "email"]
-    else:
-        channels_to_send = [effective_channel]
+    _EXPAND: dict[str, list[str]] = {
+        "both": ["telegram", "email"],
+        "telegram": ["telegram"],
+        "email": ["email"],
+        # legacy WhatsApp paths — kept for backwards compat during migration
+        "whatsapp": ["whatsapp"],
+    }
+    channels_to_send: list[str] = list(_EXPAND.get(effective_channel, ["telegram"]))
 
-    # WhatsApp: require verified number
+    # Telegram: require telegram_chat_id to be set
+    if "telegram" in channels_to_send and not user.get("telegram_chat_id"):
+        channels_to_send = [c for c in channels_to_send if c != "telegram"]
+
+    # Email: require verified email that hasn't bounced
+    if "email" in channels_to_send:
+        if not user.get("email_verified") or not user.get("email") or not user.get("email_valid", True):
+            channels_to_send = [c for c in channels_to_send if c != "email"]
+
+    # WhatsApp (legacy): require verified number
     if "whatsapp" in channels_to_send:
         if not user.get("whatsapp_verified"):
             wa_number = user.get("whatsapp_number") or user.get("phone")
             if not wa_number:
                 channels_to_send = [c for c in channels_to_send if c != "whatsapp"]
-            # allow unverified if they have a number (legacy compat)
-
-    # Email: require verified email
-    if "email" in channels_to_send:
-        if not user.get("email_verified") or not user.get("email"):
-            channels_to_send = [c for c in channels_to_send if c != "email"]
 
     if not channels_to_send:
         log.debug("no valid channels for user", user_id=user_id)
@@ -189,15 +197,14 @@ def enqueue_notification(
     enqueued = False
 
     for ch in channels_to_send:
-        # Daily cap check (WhatsApp only)
-        if ch == "whatsapp":
-            cap = user.get("daily_wa_cap", 100)
-            try:
-                if not db.check_daily_cap(user_id, ch, cap):
-                    log.info("daily cap reached", user_id=user_id, channel=ch)
-                    continue
-            except Exception:
-                pass
+        # Daily cap check
+        cap = user.get("max_notifications_per_day") or user.get("daily_wa_cap") or 100
+        try:
+            if not db.check_daily_cap(user_id, ch, cap):
+                log.info("daily cap reached", user_id=user_id, channel=ch)
+                continue
+        except Exception:
+            pass
 
         # Dedup check
         window_hours = _DEDUP_HOURS.get(trigger_type, 1)
