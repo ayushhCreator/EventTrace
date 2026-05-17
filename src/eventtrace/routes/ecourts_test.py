@@ -870,18 +870,11 @@ async def get_case_history(request: Request):
     case_no = str(body.get("case_no", "")).strip()
     year = str(body.get("year", "")).strip()
 
-    if not all([cino, state_cd, court_code, case_type_id, case_no, year]):
+    if not all([cino, state_cd, court_code]):
         return JSONResponse(
-            {
-                "error": "Missing required fields: cino, state_cd, court_code, case_type_id, case_no, year"
-            },
+            {"error": "Missing required fields: cino, state_cd, court_code"},
             status_code=400,
         )
-
-    settings = request.app.state.settings
-    api_key = getattr(settings, "anthropic_api_key", None) or os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
 
     db = get_db(request)
     ttl_seconds = int(os.getenv("CASE_HISTORY_CACHE_TTL_SECONDS", "3600"))
@@ -891,6 +884,18 @@ async def get_case_history(request: Request):
         return cached
     except Exception as exc:
       log.warning("case_history cache lookup failed: %s", exc)
+
+    # Live fetch requires full params + Anthropic key
+    if not all([case_type_id, case_no, year]):
+        return JSONResponse(
+            {"error": "Not in cache; case_type_id, case_no, year required for live fetch"},
+            status_code=400,
+        )
+
+    settings = request.app.state.settings
+    api_key = getattr(settings, "anthropic_api_key", None) or os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return JSONResponse({"error": "ANTHROPIC_API_KEY not set"}, status_code=500)
 
     try:
         result = _do_case_history(state_cd, court_code, case_type_id, case_no, year, cino, api_key)
