@@ -32,6 +32,31 @@ from .routes.webhooks import router as webhooks_router
 
 limiter = Limiter(key_func=get_remote_address)
 
+import structlog as _structlog
+_log = _structlog.get_logger()
+
+
+def _register_telegram_webhook() -> None:
+    """Call Telegram setWebhook on startup if token + public URL are configured."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    public_url = os.getenv("CHD_PUBLIC_URL", "").rstrip("/")
+    if not token or not public_url:
+        return
+    webhook_url = public_url + "/webhooks/telegram"
+    try:
+        import httpx
+        resp = httpx.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": webhook_url, "allowed_updates": ["message", "callback_query"]},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            _log.info("telegram webhook registered", url=webhook_url)
+        else:
+            _log.warning("telegram webhook registration failed", status=resp.status_code, body=resp.text[:200])
+    except Exception as exc:
+        _log.warning("telegram webhook registration exception", exc=str(exc))
+
 
 def create_app() -> FastAPI:
     settings = Settings()
@@ -40,6 +65,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         db.ensure_schema()
+        _register_telegram_webhook()
         yield
 
     app = FastAPI(title="CHD EventTrace", version="0.2.0", lifespan=lifespan)

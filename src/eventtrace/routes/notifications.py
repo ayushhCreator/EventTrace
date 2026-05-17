@@ -3,11 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from ..routes.auth import _current_user
 from ..services.deps import get_db
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+class NotificationPrefsUpdate(BaseModel):
+    preferred_channel: str | None = Field(None, pattern="^(telegram|email|both)$")
+    quiet_hours_start: str | None = Field(None, pattern=r"^\d{2}:\d{2}$")
+    quiet_hours_end: str | None = Field(None, pattern=r"^\d{2}:\d{2}$")
+    max_notifications_per_day: int | None = Field(None, ge=1, le=100)
 
 
 @router.get("")
@@ -60,3 +68,24 @@ def mark_all_read(
 ) -> dict:
     count = db.mark_all_notifications_read(str(current_user["id"]))
     return {"marked": count}
+
+
+@router.patch("/prefs")
+def update_notification_prefs(
+    body: NotificationPrefsUpdate,
+    db: Any = Depends(get_db),
+    current_user: dict = Depends(_current_user),
+) -> dict:
+    """Update the current user's notification preferences.
+
+    Only supplied fields are updated (partial update).
+    """
+    user_id = str(current_user["id"])
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    try:
+        db.update_user_notification_prefs(user_id, updates)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "updated": list(updates.keys())}

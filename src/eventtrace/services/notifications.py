@@ -228,7 +228,18 @@ def send_msg91_session_message(phone: str, text: str, auth_key: str) -> bool:
 # ── Email delivery (Resend) ───────────────────────────────────────────────────
 
 
-def send_email_alert(to_email: str, subject: str, body_html: str) -> bool:
+def send_email_alert(
+    to_email: str,
+    subject: str,
+    body_html: str,
+    body_text: str = "",
+    db: Any = None,
+    user_id: str = "",
+) -> bool:
+    """Send email via Resend with HTML + plain-text fallback.
+
+    db + user_id: if provided, hard bounce (4xx) sets email_valid=0 on the user.
+    """
     api_key = _resend_key()
     if not api_key:
         log.info("RESEND_API_KEY not set — skipping email to %s", to_email)
@@ -236,24 +247,39 @@ def send_email_alert(to_email: str, subject: str, body_html: str) -> bool:
     try:
         import httpx
 
+        payload: dict = {
+            "from": _resend_from(),
+            "to": [to_email],
+            "subject": subject,
+            "html": body_html,
+        }
+        if body_text:
+            payload["text"] = body_text
+
         resp = httpx.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "from": _resend_from(),
-                "to": [to_email],
-                "subject": subject,
-                "html": body_html,
-            },
+            json=payload,
             timeout=10,
         )
         if resp.status_code >= 400:
             log.warning("Resend error %s: %s", resp.status_code, resp.text[:200])
+            if 400 <= resp.status_code < 500 and db and user_id:
+                _handle_hard_bounce(db, user_id, to_email)
             return False
         return True
     except Exception as exc:
         log.warning("Resend email failed: %s", exc)
         return False
+
+
+def _handle_hard_bounce(db: Any, user_id: str, email: str) -> None:
+    """Mark user's email as invalid after a hard bounce."""
+    try:
+        db.set_email_invalid(user_id)
+        log.warning("email hard bounce: marked email_valid=0", user_id=user_id, email=email)
+    except Exception as exc:
+        log.warning("_handle_hard_bounce: db call failed", exc=str(exc))
 
 
 # ── Main send_alert ───────────────────────────────────────────────────────────
@@ -313,8 +339,13 @@ def send_alert(
     email = user.get("email", "")
     if email and user.get("email_verified") and prefs.get("email", True):
         subject = _email_subject(alert_type, context, case_ref)
-        body_html = build_email_html(alert_type, {**context, "case_ref": case_ref}, case_ref)
-        send_email_alert(email, subject, body_html)
+        ctx = {**context, "case_ref": case_ref}
+        unsubscribe_token = user.get("unsubscribe_token", "")
+        api_url = os.getenv("CHD_PUBLIC_URL", "").rstrip("/")
+        unsubscribe_url = f"{api_url}/unsubscribe?token={unsubscribe_token}" if unsubscribe_token else ""
+        body_html = build_email_html(alert_type, ctx, case_ref, unsubscribe_url=unsubscribe_url)
+        body_text = _build_plain_text(alert_type, ctx, case_ref)
+        send_email_alert(email, subject, body_html, body_text=body_text, db=db, user_id=str(user_id))
 
 
 def _email_subject(alert_type: str, context: dict, case_ref: str) -> str:
@@ -342,7 +373,7 @@ _EMAIL_WRAPPER = """\
 <html>
 <head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:24px 0;">
+<table width="100%%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:24px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%%;">
   <tr><td style="background:#1a1a2e;padding:20px 32px;">
@@ -352,11 +383,16 @@ _EMAIL_WRAPPER = """\
     {body}
   </td></tr>
   <tr><td style="background:#f8f8f8;padding:16px 32px;border-top:1px solid #e8e8e8;">
-    <p style="margin:0;font-size:12px;color:#888;">You're receiving this because you track cases on SuperSahayak Legal.</p>
+    <p style="margin:0;font-size:12px;color:#888;">
+      You're receiving this because you track cases on SuperSahayak Legal.
+      {unsubscribe_html}
+    </p>
   </td></tr>
 </table>
 </td></tr></table>
 </body></html>"""
+
+_UNSUBSCRIBE_HTML = '<br><a href="{url}" style="color:#888;font-size:11px;">Unsubscribe from email alerts</a>'
 
 
 def _kv_row(label: str, value: str) -> str:
@@ -366,7 +402,13 @@ def _kv_row(label: str, value: str) -> str:
     )
 
 
-def build_email_html(trigger_type: str, context: dict, case_ref: str) -> str:
+def _build_plain_text(trigger_type: str, context: dict, case_ref: str) -> str:
+    """Plain-text fallback for every email. Simple, no HTML."""
+    from .notification_dispatch import build_message
+    return build_message(trigger_type, {**context, "case_ref": case_ref})
+
+
+def build_email_html(trigger_type: str, context: dict, case_ref: str, unsubscribe_url: str = "") -> str:
     if trigger_type == "case_in_causelist":
         date = context.get("date", "")
         court = context.get("court_no", "")
@@ -511,4 +553,5 @@ def build_email_html(trigger_type: str, context: dict, case_ref: str) -> str:
             f'<p style="color:#444;font-size:14px;line-height:1.6;">{lines}</p>'
         )
 
-    return _EMAIL_WRAPPER.format(body=body)
+    unsub_html = _UNSUBSCRIBE_HTML.format(url=unsubscribe_url) if unsubscribe_url else ""
+    return _EMAIL_WRAPPER.format(body=body, unsubscribe_html=unsub_html)

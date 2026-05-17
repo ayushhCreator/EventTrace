@@ -6,8 +6,11 @@ import json
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse
+
+log = structlog.get_logger()
 
 from ..common.time import iso, utc_now
 from ..services.deps import get_db, get_settings
@@ -188,5 +191,150 @@ async def msg91_delivery_webhook(
             read_at=read_at,
         )
         updated += 1
+
+    return {"ok": True, "updated": updated}
+
+
+# ── Telegram webhook ───────────────────────────────────────────────────────────
+
+
+@router.post("/webhooks/telegram")
+async def telegram_webhook(
+    request: Request,
+    db: Any = Depends(get_db),
+) -> dict:
+    """Telegram calls this for every update (user messages, callback queries).
+
+    Must return 200 quickly — heavy processing happens asynchronously.
+    """
+    try:
+        update = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    # Handle /start and /help commands
+    message = update.get("message") or {}
+    text = (message.get("text") or "").strip()
+    chat_id = message.get("chat", {}).get("id")
+    user_tg = message.get("from", {})
+
+    if chat_id and text.startswith("/start"):
+        # Register telegram_chat_id against the user (if known by phone)
+        _handle_telegram_start(db, chat_id, user_tg, text)
+
+    # Callback queries (inline keyboard button presses) — acknowledge immediately
+    callback_query = update.get("callback_query")
+    if callback_query:
+        _handle_callback_query(db, callback_query)
+
+    return {"ok": True}
+
+
+def _handle_telegram_start(db: Any, chat_id: int, tg_user: dict, text: str) -> None:
+    """Link Telegram chat_id to a SuperSahayak user account if possible."""
+    import os
+    import httpx as _httpx
+
+    username = tg_user.get("username", "")
+    first_name = tg_user.get("first_name", "")
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+    reply = (
+        f"👋 Welcome{' ' + first_name if first_name else ''} to SuperSahayak Legal!\n\n"
+        "You'll receive case alerts here once your account is linked.\n"
+        "Log in at supersahayak.in to connect your Telegram account."
+    )
+    if token:
+        try:
+            _httpx.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": reply},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+    if username:
+        try:
+            db.set_telegram_chat_id_by_username(username, chat_id)
+        except Exception:
+            pass
+
+
+def _handle_callback_query(db: Any, callback_query: dict) -> None:
+    import os
+    import httpx as _httpx
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    query_id = callback_query.get("id", "")
+    if token and query_id:
+        try:
+            _httpx.post(
+                f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+                json={"callback_query_id": query_id},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+
+# ── Unsubscribe endpoint ───────────────────────────────────────────────────────
+
+
+@router.get("/unsubscribe")
+async def unsubscribe_email(
+    token: str,
+    db: Any = Depends(get_db),
+) -> dict:
+    """One-click unsubscribe from email alerts via token in email footer."""
+    if not token:
+        return {"ok": False, "detail": "Missing token"}
+    try:
+        user = db.get_user_by_unsubscribe_token(token)
+        if not user:
+            return {"ok": False, "detail": "Invalid token"}
+        db.set_email_invalid(str(user["id"]))
+        return {"ok": True, "message": "You have been unsubscribed from email alerts."}
+    except Exception as exc:
+        log.warning("unsubscribe: error", exc=str(exc))
+        return {"ok": False, "detail": "Error processing request"}
+
+
+# ── Resend bounce webhook ─────────────────────────────────────────────────────
+
+
+@router.post("/webhooks/resend")
+async def resend_bounce_webhook(
+    request: Request,
+    db: Any = Depends(get_db),
+) -> dict:
+    """Resend calls this for bounce/complaint events.
+
+    On hard bounce (type=email.bounced): set email_valid=0 on the user.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    event_type = payload.get("type", "")
+    if event_type not in ("email.bounced", "email.complained"):
+        return {"ok": True, "skipped": True}
+
+    data = payload.get("data", {})
+    to_addresses = data.get("to", [])
+    if isinstance(to_addresses, str):
+        to_addresses = [to_addresses]
+
+    updated = 0
+    for email in to_addresses:
+        try:
+            user = db.get_user_by_email(email)
+            if user:
+                db.set_email_invalid(str(user["id"]))
+                log.warning("resend_bounce: marked email_valid=0", email=email, event=event_type)
+                updated += 1
+        except Exception as exc:
+            log.warning("resend_bounce: db error", exc=str(exc), email=email)
 
     return {"ok": True, "updated": updated}
