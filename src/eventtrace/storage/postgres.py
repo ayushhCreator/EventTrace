@@ -557,6 +557,26 @@ class PostgresDB:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
 
+    def list_distinct_ecourts_cases(self) -> list[dict]:
+        """One row per distinct cino; includes all user_ids and case_refs tracking it."""
+        sql = """
+            SELECT
+                cino, state_cd, court_code, case_type_id, case_no, case_year,
+                ARRAY_AGG(DISTINCT user_id::TEXT) AS user_ids,
+                ARRAY_AGG(DISTINCT case_ref)       AS case_refs
+            FROM tracked_cases
+            WHERE cino IS NOT NULL AND cino <> ''
+              AND case_type_id IS NOT NULL AND case_type_id <> ''
+              AND state_cd IS NOT NULL AND state_cd <> ''
+              AND court_code IS NOT NULL AND court_code <> ''
+              AND case_no IS NOT NULL AND case_no <> ''
+              AND case_year IS NOT NULL AND case_year <> ''
+            GROUP BY cino, state_cd, court_code, case_type_id, case_no, case_year
+        """
+        with self._cursor() as cur:
+            cur.execute(sql)
+            return [dict(r) for r in cur.fetchall()]
+
     def get_case_history_cache(
         self,
         cino: str,
