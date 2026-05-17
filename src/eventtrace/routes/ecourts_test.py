@@ -902,8 +902,8 @@ async def search_by_case_no(request: Request):
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
-        log.error("case_search error", exc_info=True)
-        return JSONResponse({"error": str(e)}, status_code=502)
+        log.error("case_search error: %s: %s", type(e).__name__, e, exc_info=True)
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=502)
 
 
 @router.post("/api/case-history")
