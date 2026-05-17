@@ -69,36 +69,46 @@ def backfill_causelist(days: int = 7) -> None:
 
     log.info("Backfill: %d (source, date) pairs to fetch (workers=%d)", len(work), _FETCH_WORKERS)
 
-    # Fetch all in parallel, store sequentially (DB writes not thread-safe for SQLite)
-    results = {}
-    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
-        futures = {pool.submit(_fetch_one, src, d): (src, d) for src, d in work}
-        for future in as_completed(futures):
-            src, d = futures[future]
-            try:
-                result = future.result()
-                results[(src.source_id, d)] = result
-            except Exception as exc:
-                log.error("[%s] %s fetch exception: %s", src.source_id, d, exc)
+    # Group work by date — process one day at a time to bound memory usage.
+    # Each day: fetch all sources in parallel, store immediately, then free RAM.
+    from itertools import groupby
+    work_by_date: dict[date, list[Any]] = {}
+    for src, d in work:
+        work_by_date.setdefault(d, []).append(src)
 
-    # Store in order (sequential to avoid concurrent DB writes)
-    for source, for_date in work:
-        result = results.get((source.source_id, for_date))
-        if result is None:
-            continue
-        if not result.ok:
-            log.warning(
-                "[%s] no data for %s: %s", source.source_id, for_date, result.error or "empty"
+    for for_date in sorted(work_by_date):
+        day_sources = work_by_date[for_date]
+        log.info("Backfill: fetching %d sources for %s", len(day_sources), for_date)
+
+        day_results: dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
+            futures = {pool.submit(_fetch_one, src, for_date): src for src in day_sources}
+            for future in as_completed(futures):
+                src = futures[future]
+                try:
+                    day_results[src.source_id] = future.result()
+                except Exception as exc:
+                    log.error("[%s] %s fetch exception: %s", src.source_id, for_date, exc)
+
+        # Store immediately, then release day results from memory
+        for src in day_sources:
+            result = day_results.get(src.source_id)
+            if result is None:
+                continue
+            if not result.ok:
+                log.warning(
+                    "[%s] no data for %s: %s", src.source_id, for_date, result.error or "empty"
+                )
+                continue
+            n = db.store_causelist(result.courts)
+            log.info(
+                "[%s] stored %d cases (%d courts) for %s",
+                src.source_id,
+                n,
+                len(result.courts),
+                for_date,
             )
-            continue
-        n = db.store_causelist(result.courts)
-        log.info(
-            "[%s] stored %d cases (%d courts) for %s",
-            source.source_id,
-            n,
-            len(result.courts),
-            for_date,
-        )
+        day_results.clear()
 
 
 def main() -> None:
