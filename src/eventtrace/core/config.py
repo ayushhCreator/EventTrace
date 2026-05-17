@@ -61,7 +61,11 @@ class Settings:
             "CHD_STORAGE_STATE_PATH", "./.state/storage_state.json"
         )
         self.headless = headless if headless is not None else _get_env_bool("CHD_HEADLESS", True)
-        self.telegram_token = telegram_token or _get_env("TELEGRAM_TOKEN", "")
+        self.telegram_token = (
+            telegram_token
+            or _get_env("TELEGRAM_TOKEN", "")
+            or _get_env("TELEGRAM_BOT_TOKEN", "")
+        )
         self.twilio_account_sid = _get_env("TWILIO_ACCOUNT_SID", "")
         self.twilio_auth_token = _get_env("TWILIO_AUTH_TOKEN", "")
         # e.g. "whatsapp:+14155238886"  (sandbox) or dedicated number

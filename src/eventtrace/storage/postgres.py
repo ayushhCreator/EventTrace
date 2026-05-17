@@ -373,6 +373,7 @@ class PostgresDB:
         bar_enrollment_number: str | None = None,
         firm_name: str | None = None,
         secondary_email: str | None = None,
+        telegram_username: str | None = None,
     ) -> dict | None:
         return self._auth.update_user_profile(
             user_id,
@@ -383,7 +384,14 @@ class PostgresDB:
             bar_enrollment_number=bar_enrollment_number,
             firm_name=firm_name,
             secondary_email=secondary_email,
+            telegram_username=telegram_username,
         )
+
+    def clear_telegram_chat_id(self, user_id: str) -> dict | None:
+        return self._auth.clear_telegram_chat_id(user_id)
+
+    def get_user_by_telegram_chat_id(self, chat_id: int) -> dict | None:
+        return self._auth.get_user_by_telegram_chat_id(chat_id)
 
     def save_email_otp(self, email: str, user_id: str, otp_hash: str, expires_at) -> None:
         return self._auth.save_email_otp(email, user_id, otp_hash, expires_at)

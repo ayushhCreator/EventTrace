@@ -224,10 +224,27 @@ def update_me(
         bar_enrollment_number=body.bar_enrollment_number,
         firm_name=body.firm_name,
         secondary_email=body.secondary_email,
+        telegram_username=body.telegram_username,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
     return updated
+
+
+@router.delete("/telegram")
+def unlink_telegram(
+    current_user: dict = Depends(_current_user),
+    db: Any = Depends(get_db),
+) -> dict:
+    updated = db.clear_telegram_chat_id(current_user["id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated
+
+
+@router.get("/config")
+def get_config(settings=Depends(get_settings)) -> dict:
+    return {"telegram_bot_username": settings.telegram_bot_username}
 
 
 class SendEmailOTPRequest(BaseModel):

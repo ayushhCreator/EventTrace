@@ -200,6 +200,7 @@ class SQLAlchemyAuthRepository:
         bar_enrollment_number: str | None = None,
         firm_name: str | None = None,
         secondary_email: str | None = None,
+        telegram_username: str | None = None,
     ) -> dict | None:
         with Session(self._engine) as session:
             user = session.get(User, user_id)
@@ -219,6 +220,19 @@ class SQLAlchemyAuthRepository:
                 user.firm_name = firm_name
             if secondary_email is not None:
                 user.secondary_email = secondary_email
+            if telegram_username is not None:
+                user.telegram_username = telegram_username.lstrip("@").lower() or None
+            session.commit()
+            session.refresh(user)
+            return _user_to_dict(user)
+
+    def clear_telegram_chat_id(self, user_id: str) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.get(User, user_id)
+            if not user:
+                return None
+            user.telegram_chat_id = None
+            user.telegram_username = None
             session.commit()
             session.refresh(user)
             return _user_to_dict(user)
@@ -432,6 +446,13 @@ class SQLAlchemyAuthRepository:
         }
 
     # ── Telegram + notification prefs ─────────────────────────────────────────
+
+    def get_user_by_telegram_chat_id(self, chat_id: int) -> dict | None:
+        with Session(self._engine) as session:
+            user = session.scalar(
+                select(User).where(User.telegram_chat_id == str(chat_id)).limit(1)
+            )
+            return _user_to_dict(user) if user else None
 
     def set_telegram_chat_id_by_username(self, telegram_username: str, chat_id: int) -> None:
         """Link a Telegram chat_id to a user by their telegram_username."""

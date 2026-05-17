@@ -46,6 +46,7 @@ class UpdateProfileRequest(BaseModel):
     bar_enrollment_number: str | None = None
     firm_name: str | None = None
     secondary_email: str | None = None
+    telegram_username: str | None = None
 
     @field_validator("whatsapp_number")
     @classmethod

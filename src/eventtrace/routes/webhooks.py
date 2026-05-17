@@ -150,7 +150,7 @@ async def msg91_inbound_webhook(
     else:
         msg = (
             "Hi! SuperSahayak Legal helps advocates track High Court cases in real time.\n\n"
-            "Create your account at supersahayak.in to get case alerts on WhatsApp."
+            "Create your account at legal.supersahayak.com to get case alerts on WhatsApp."
         )
 
     if auth_key:
@@ -218,9 +218,15 @@ async def telegram_webhook(
     chat_id = message.get("chat", {}).get("id")
     user_tg = message.get("from", {})
 
-    if chat_id and text.startswith("/start"):
-        # Register telegram_chat_id against the user (if known by phone)
-        _handle_telegram_start(db, chat_id, user_tg, text)
+    if chat_id and text:
+        telegram_id = str(user_tg.get("id", chat_id))
+        if text.startswith("/start"):
+            _handle_telegram_start(db, chat_id, user_tg, text)
+        else:
+            from ..bots.telegram_bot import handle_command
+            reply = handle_command(db, telegram_id, text)
+            if reply:
+                _send_tg(chat_id, reply)
 
     # Callback queries (inline keyboard button presses) — acknowledge immediately
     callback_query = update.get("callback_query")
@@ -230,33 +236,83 @@ async def telegram_webhook(
     return {"ok": True}
 
 
+def _send_tg(chat_id: int, text: str) -> None:
+    import os
+    import httpx as _httpx
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return
+    try:
+        _httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown",
+                  "disable_web_page_preview": True},
+            timeout=8,
+        )
+    except Exception:
+        pass
+
+
 def _handle_telegram_start(db: Any, chat_id: int, tg_user: dict, text: str) -> None:
     """Link Telegram chat_id to a SuperSahayak user account if possible."""
     import os
     import httpx as _httpx
+    from datetime import datetime, timezone, timedelta
 
     username = tg_user.get("username", "")
     first_name = tg_user.get("first_name", "")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    _IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(_IST).strftime("%d %b %Y, %I:%M %p IST")
 
-    reply = (
-        f"👋 Welcome{' ' + first_name if first_name else ''} to SuperSahayak Legal!\n\n"
-        "You'll receive case alerts here once your account is linked.\n"
-        "Log in at supersahayak.in to connect your Telegram account."
-    )
+    # Try to link and check if user already exists
+    user_found = False
+    if username:
+        try:
+            db.set_telegram_chat_id_by_username(username, chat_id)
+        except Exception:
+            pass
+
+    # Check if this chat_id is already linked to a user
+    try:
+        linked_user = db.get_user_by_telegram_chat_id(chat_id)
+        user_found = linked_user is not None
+    except Exception:
+        user_found = False
+
+    bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "SuperSahayakLegalBot")
+
+    if user_found:
+        name = linked_user.get("name") or first_name or "there"
+        reply = (
+            f"👋 Welcome back, {name}!\n\n"
+            f"✅ Your account is linked to SuperSahayak Legal.\n\n"
+            f"*Commands:*\n"
+            f"/today — active courts right now\n"
+            f"/watch <room> <serial> — set serial alert\n"
+            f"/list — your active alerts\n"
+            f"/help — all commands\n\n"
+            f"🕐 {now_ist}"
+        )
+    else:
+        reply = (
+            f"👋 Welcome{' ' + first_name if first_name else ''} to SuperSahayak Legal!\n\n"
+            f"To receive court alerts here, link your Telegram account:\n"
+            f"1️⃣ Log in at [legal.supersahayak.com](https://legal.supersahayak.com)\n"
+            f"2️⃣ Go to Settings → Telegram\n"
+            f"3️⃣ Enter your username: @{username or 'your_username'}\n\n"
+            f"Once linked, use /today to see live court data.\n\n"
+            f"🕐 {now_ist}"
+        )
+
     if token:
         try:
             _httpx.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": reply},
+                json={"chat_id": chat_id, "text": reply, "parse_mode": "Markdown",
+                      "disable_web_page_preview": True},
                 timeout=5,
             )
-        except Exception:
-            pass
-
-    if username:
-        try:
-            db.set_telegram_chat_id_by_username(username, chat_id)
         except Exception:
             pass
 
