@@ -529,14 +529,43 @@ class PostgresDB:
                   (SELECT MIN(cc.list_date)
                      FROM causelist_case cc
                     WHERE cc.case_ref = tc.case_ref
-                      AND cc.list_date > CURRENT_DATE::TEXT) AS next_hearing_date
+                      AND cc.list_date > CURRENT_DATE::TEXT) AS next_hearing_date,
+                  (SELECT chc.data_json
+                     FROM case_history_cache chc
+                    WHERE chc.cino = tc.cino
+                    ORDER BY chc.fetched_at DESC
+                    LIMIT 1) AS ecourts_data_json,
+                  (SELECT chc.fetched_at
+                     FROM case_history_cache chc
+                    WHERE chc.cino = tc.cino
+                    ORDER BY chc.fetched_at DESC
+                    LIMIT 1) AS ecourts_synced_at
                 FROM tracked_cases tc
                 WHERE tc.user_id = %s
                 ORDER BY tc.added_at DESC
                 """,
                 (user_id,),
             )
-            return [dict(r) for r in cur.fetchall()]
+            rows = []
+            for r in cur.fetchall():
+                row = dict(r)
+                # Parse eCourts cache JSON into flat summary fields
+                raw_json = row.pop("ecourts_data_json", None)
+                if raw_json:
+                    try:
+                        ecdata = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+                        cs = ecdata.get("case_status") or {}
+                        row["ecourts_next_hearing"] = (
+                            cs.get("Next Hearing Date") or cs.get("next_hearing_date") or ""
+                        )
+                        row["ecourts_stage"] = (
+                            cs.get("Stage of Case") or cs.get("stage_of_case") or ""
+                        )
+                        row["ecourts_orders_count"] = len(ecdata.get("orders") or [])
+                    except Exception:
+                        pass
+                rows.append(row)
+            return rows
 
     def list_tracked_cases_for_refresh(self, limit: int | None = None) -> list[dict]:
         sql = (
